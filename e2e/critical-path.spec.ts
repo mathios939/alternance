@@ -22,8 +22,8 @@ async function expectToast(page: Page, text: RegExp | string) {
 }
 
 test("un nouvel utilisateur trouve, sauvegarde, candidate et se voit proposer une relance", async ({ page, isMobile }) => {
-  test.skip(isMobile, "Parcours desktop (panneau de détail à 3 colonnes)");
-  test.setTimeout(240_000);
+  // Le même parcours est joué sur desktop (3 colonnes) et sur mobile (liste → détail plein écran → retour liste).
+  test.setTimeout(300_000);
 
   // 1. Accueil
   await page.goto("/");
@@ -74,9 +74,9 @@ test("un nouvel utilisateur trouve, sauvegarde, candidate et se voit proposer un
   const cardLabel = (await firstCard.getAttribute("aria-label")) ?? "";
   const companyName = cardLabel.split(" chez ").pop() ?? "";
 
-  // 6-7. Détail de l'offre + Match Score, sans rechargement
+  // 6-7. Détail de l'offre + Match Score, sans rechargement (colonne de droite sur desktop, panneau plein écran sur mobile)
   await firstCard.click();
-  const pane = page.getByRole("complementary", { name: "Détail de l'offre" });
+  const pane = isMobile ? page.getByRole("dialog", { name: "Détail de l'offre" }) : page.getByRole("complementary", { name: "Détail de l'offre" });
   await expect(pane.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
   await expect(pane.getByText("Ton score")).toBeVisible();
   await expect(pane.getByText(/\d+\s?%/).first()).toBeVisible();
@@ -90,7 +90,14 @@ test("un nouvel utilisateur trouve, sauvegarde, candidate et se voit proposer un
   await pane.getByRole("button", { name: /^Candidater/ }).click();
   await expectToast(page, /Ajoutée à tes candidatures/);
 
-  // 10. Kanban
+  if (isMobile) {
+    // Retour à la liste : la recherche et la position sont conservées (la liste reste montée sous le panneau)
+    await pane.getByRole("button", { name: /Retour aux résultats/ }).click();
+    await expect(page).toHaveURL(/q=d%C3%A9veloppeur|q=développeur/);
+    await expect(firstCard).toBeVisible();
+  }
+
+  // 10. Kanban (colonnes défilantes horizontalement sur mobile)
   await page.goto("/applications");
   const toApply = page.getByRole("region", { name: "À candidater" });
   await expect(toApply.getByText(companyName, { exact: true }).first()).toBeVisible();

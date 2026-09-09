@@ -44,6 +44,18 @@ Schéma complet : `prisma/schema.prisma`. Toutes les tables sont en snake_case (
 - **AIConversation / AIMessage** — historique du copilote (fournisseur, modèle, tokens).
 - **Report** — signalements (offre expirée, fausse offre, information/contact/entreprise incorrects) avec statut.
 
+## Provenance, vérification et ingestion (phase données réelles)
+
+- `Job` : `normalizedTitle`, `companyNameRaw`, `salaryPeriod`, `romeCode`, `nafCode`, `positionsCount`, `applicationEmail` / `applicationLabel` (canal publié dans l'offre), `verificationStatus` (`ACTIVE` / `UNKNOWN` / `EXPIRED` / `REMOVED`), `lastVerifiedAt`, `dataQualityScore` (0-100), `remote` accepte `UNKNOWN`.
+- `JobSourceEntry` : une ligne par source qui publie l'offre — `externalId`, `url`, `applicationUrl` / `applicationEmail` / `applicationLabel`, `publishedAt`, `expiresAt`, `status`, `lastVerifiedAt`, `duplicateConfidence` (0-1), `isPrimary` (source de candidature retenue), `rawPayload`.
+- `JobSource` : `priority` (page carrière 90 > source officielle 70 > agrégateur), `capabilities` (JSON).
+- `IngestionRun` : journal de chaque exécution (`sourceKey`, `trigger`, `startedAt` / `finishedAt` / `durationMs`, `status` RUNNING / SUCCESS / PARTIAL / ERROR / SKIPPED, compteurs `fetched` / `created` / `updated` / `duplicate` / `rejected` / `failed` / `expired`, `errorSummary`, `errors`).
+- `Company` : identité légale SIRENE (`legalName`, `brandName`, `siren`, `siret`, `nafCode` / `nafLabel`, `legalCategory`, `employeeRange` / `employeeRangeLabel`, `registeredAt`, `address`), `nameNormalized` (rapprochement), `sizeOrigin` (REAL / ESTIMATED / UNKNOWN / DEMO), `isPlaceholder` (fiche « Employeur non communiqué », jamais listée), `dataSources` (JSON `[{ source, url, fetchedAt, label }]`), `lastVerifiedAt`.
+- `Contact` : `displayName`, `jobId` (offre d'origine), `contactUrl`, `source = JOB_POSTING`, `publiclyAvailable`, `professionalContext`, `verifiedAt`, `confidenceScore`, `optOutAt`.
+- `DataOrigin` gagne `UNKNOWN` ; `ContactSource` gagne `JOB_POSTING`.
+
+Migrations : `20260909191314_real_data_pipeline` (colonnes, `IngestionRun`, extension `unaccent`, configuration `french_unaccent`, index GIN et trigrammes), `company_size_origin`, `remote_policy_unknown`.
+
 ## Index
 
 Index B-tree sur les clés étrangères, villes/régions/départements, familles et secteurs, dates, coordonnées ; index GIN plein texte (`to_tsvector('french', title || description)`) sur `job` et `company` ; index trigram (`pg_trgm`) sur les titres et noms.

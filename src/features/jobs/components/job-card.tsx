@@ -4,9 +4,11 @@ import { useOptimistic, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Bookmark, BookmarkCheck, Building2, Clock, GraduationCap, MapPin, Send, Wifi, Check } from "lucide-react";
+import { Bookmark, BookmarkCheck, Building2, Clock, GraduationCap, MapPin, Send, Wifi, Check, ShieldCheck } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
-import { formatPublishedAgo, formatDistanceKm } from "@/lib/format";
+import { formatDistanceKm } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
+import { describeVerification } from "@/lib/verification";
 import { educationRangeLabel, REMOTE_POLICIES, APPLICATION_STATUSES, CONTRACT_TYPES } from "@/config/taxonomy";
 import type { JobCardData } from "@/features/jobs/types";
 import { Badge } from "@/components/ui/badge";
@@ -100,8 +102,14 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
           {job.distanceKm !== null ? <span className="text-foreground/70"> · {formatDistanceKm(job.distanceKm)}</span> : null}
         </span>
         <span className="inline-flex items-center gap-1">
-          <Clock className="size-3.5" aria-hidden /> Publié {formatPublishedAgo(job.publishedAt)}
+          <Clock className="size-3.5" aria-hidden /> Publié <RelativeTime date={job.publishedAt} mode="published" />
         </span>
+        {!job.isDemo ? (
+          <span className="inline-flex items-center gap-1" title={describeVerification(job.verificationStatus, job.lastVerifiedAt).label}>
+            <ShieldCheck className={cn("size-3.5", job.verificationStatus === "ACTIVE" ? "text-success" : "text-warning")} aria-hidden /> {job.sourceLabel}
+            {job.sourceCount > 1 ? ` (+${job.sourceCount - 1})` : ""}
+          </span>
+        ) : null}
         <span className="inline-flex items-center gap-1">
           <GraduationCap className="size-3.5" aria-hidden /> {educationRangeLabel(job.educationLevelMin, job.educationLevelMax)}
         </span>

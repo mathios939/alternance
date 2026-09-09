@@ -1,4 +1,4 @@
-import type { ContractType, EducationLevel, RemotePolicy, WorkRhythm, ApplicationStatus, CompanySize, DataOrigin } from "@/generated/prisma/enums";
+import type { ContractType, EducationLevel, RemotePolicy, WorkRhythm, ApplicationStatus, CompanySize, DataOrigin, JobVerificationStatus, SalaryPeriod } from "@/generated/prisma/enums";
 import type { MatchResult } from "@/lib/matching";
 
 /** Données nécessaires à l'affichage d'une JobCard (sérialisables → utilisables côté client). */
@@ -18,12 +18,17 @@ export type JobCardData = {
   durationMonths: number | null;
   salaryMin: number | null;
   salaryMax: number | null;
+  salaryPeriod: SalaryPeriod | null;
   skills: Array<{ slug: string; name: string; required: boolean }>;
   jobFamily: string;
   sector: string;
   isDemo: boolean;
   dataOrigin: DataOrigin;
-  company: { id: string; slug: string; name: string; logoUrl: string | null; size: CompanySize; sector: string };
+  verificationStatus: JobVerificationStatus;
+  lastVerifiedAt: string | null;
+  sourceLabel: string;
+  sourceCount: number;
+  company: { id: string; slug: string; name: string; logoUrl: string | null; size: CompanySize; sector: string; isPlaceholder: boolean };
   match: MatchResult | null;
   distanceKm: number | null;
   priority: number | null;
@@ -55,10 +60,16 @@ export type JobDetailData = JobCardData & {
   longitude: number | null;
   sourceUrl: string | null;
   applicationUrl: string | null;
+  applicationEmail: string | null;
+  applicationLabel: string | null;
   sourceName: string;
+  /** Toutes les sources qui publient cette offre (Phase 6), la principale d'abord. */
+  sources: Array<{ key: string; name: string; url: string | null; applicationUrl: string | null; isPrimary: boolean; status: JobVerificationStatus; lastVerifiedAt: string | null }>;
   otherSources: Array<{ name: string; url: string | null }>;
+  dataQualityScore: number | null;
   viewCount: number;
   companyDetail: {
+    sizeOrigin: DataOrigin;
     description: string | null;
     website: string | null;
     careersUrl: string | null;

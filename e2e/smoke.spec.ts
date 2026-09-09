@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DEMO } from "./helpers";
+import { DEMO, login, resetDemoDocuments } from "./helpers";
 
 test.describe("pages publiques", () => {
   test("accueil, offres, entreprises et pages SEO répondent", async ({ page }) => {
@@ -18,10 +18,7 @@ test.describe("pages publiques", () => {
 
 test.describe("compte démo", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.fill("#email", DEMO.email);
-    await page.fill("#password", DEMO.password);
-    await page.getByRole("button", { name: /Se connecter/ }).click();
+    await login(page, DEMO.email, DEMO.password);
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 60_000 });
   });
 
@@ -71,6 +68,7 @@ test.describe("compte démo", () => {
   });
 
   test("la génération d'une lettre fonctionne (mode démo)", async ({ page, isMobile }) => {
+    await resetDemoDocuments();
     await page.goto("/jobs?sort=match");
     await page.getByRole("button", { name: /chez/ }).first().click();
     // Sur mobile, le détail s'ouvre dans un panneau latéral (dialog) ; sur desktop, dans la colonne de droite.
@@ -78,5 +76,19 @@ test.describe("compte démo", () => {
     await pane.getByRole("button", { name: /Créer une lettre/ }).click();
     await expect(page).toHaveURL(/\/copilot\?intent=cover_letter/);
     await expect(page.getByText(/Objet : Candidature/).first()).toBeVisible({ timeout: 60_000 });
+  });
+});
+
+test.describe("administration (compte admin)", () => {
+  test("qualité des données et sources sont consultables", async ({ page }) => {
+    await login(page, "admin@alternance.demo", "Admin1234!");
+    // Attendre la fin des redirections client avant de naviguer (sinon net::ERR_ABORTED)
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 60_000 });
+    await page.goto("/admin/data", { waitUntil: "commit" });
+    await expect(page.getByRole("heading", { name: /Qualité des données/ }).first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/France Travail/).first()).toBeVisible();
+    await page.goto("/sources");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("D'où viennent les données");
+    await expect(page.getByText(/Non configurée/).first()).toBeVisible();
   });
 });

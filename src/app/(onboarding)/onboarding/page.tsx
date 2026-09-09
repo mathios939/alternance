@@ -8,8 +8,10 @@ export const metadata: Metadata = { title: "Configurer mon assistant", robots: {
 
 export default async function OnboardingPage() {
   const user = await requireUser({ allowIncompleteOnboarding: true });
-  const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { onboardingCompletedAt: true, name: true } });
-  if (fresh?.onboardingCompletedAt) redirect("/dashboard");
+  const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { onboardingCompletedAt: true, name: true, profile: { select: { id: true } } } });
+  // Un compte marqué « onboarding terminé » mais sans profil (ex. compte admin) doit pouvoir créer son profil,
+  // sinon le tableau de bord le renvoie ici en boucle.
+  if (fresh?.onboardingCompletedAt && fresh.profile) redirect("/dashboard");
   const firstName = fresh?.name?.split(" ")[0] ?? "";
   return (
     <div className="mx-auto max-w-2xl">

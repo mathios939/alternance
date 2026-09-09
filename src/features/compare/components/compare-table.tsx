@@ -6,7 +6,8 @@ import { GitCompare, X } from "lucide-react";
 import type { JobCardData } from "@/features/jobs/types";
 import { useCompare } from "@/hooks/use-compare";
 import { COMPANY_SIZES, REMOTE_POLICIES, SECTORS, WORK_RHYTHMS, educationRangeLabel, type SectorKey } from "@/config/taxonomy";
-import { formatDistanceKm, formatPublishedAgo, formatSalary } from "@/lib/format";
+import { formatDistanceKm, formatSalary } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +55,7 @@ export function CompareTable({ initialIds }: { initialIds: string[] }) {
     { label: "Niveau", render: (j) => educationRangeLabel(j.educationLevelMin, j.educationLevelMax) },
     { label: "Durée", render: (j) => (j.durationMonths ? `${j.durationMonths} mois` : "—") },
     { label: "Rythme", render: (j) => (j.rhythm ? WORK_RHYTHMS[j.rhythm].short : "—") },
-    { label: "Publication", render: (j) => formatPublishedAgo(j.publishedAt) },
+    { label: "Publication", render: (j) => <RelativeTime date={j.publishedAt} mode="published" /> },
     {
       label: "Compétences",
       render: (j) => (

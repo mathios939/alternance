@@ -53,3 +53,25 @@ describe("priorité des opportunités", () => {
     expect(top).toBeGreaterThanOrEqual(80);
   });
 });
+
+
+describe("OpportunityScore — données d'entreprise inconnues (Phase 10)", () => {
+  it("traite un historique d'alternance inconnu comme neutre, pas comme négatif", () => {
+    const candidate = makeCandidate();
+    const knownNo = calculateOpportunityScore(candidate, makeCompany({ hiresApprentices: false, historyKnown: true }));
+    const unknown = calculateOpportunityScore(candidate, makeCompany({ hiresApprentices: false, historyKnown: false }));
+    const knownYes = calculateOpportunityScore(candidate, makeCompany({ hiresApprentices: true, historyKnown: true }));
+    expect(unknown.score).toBeGreaterThan(knownNo.score);
+    expect(unknown.score).toBeLessThan(knownYes.score);
+    expect(unknown.unknownFactors).toContain("historique d'alternance");
+    expect(unknown.isEstimate).toBe(true);
+  });
+
+  it("ne pénalise pas une taille non renseignée", () => {
+    const candidate = makeCandidate();
+    const tpeKnown = calculateOpportunityScore(candidate, makeCompany({ size: "TPE", sizeKnown: true }));
+    const unknownSize = calculateOpportunityScore(candidate, makeCompany({ size: "TPE", sizeKnown: false }));
+    expect(unknownSize.score).toBeGreaterThanOrEqual(tpeKnown.score);
+    expect(unknownSize.unknownFactors).toContain("taille");
+  });
+});

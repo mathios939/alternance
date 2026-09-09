@@ -12,6 +12,7 @@ const ITEMS = [
   { href: "/admin/reports", label: "Signalements" },
   { href: "/admin/contacts", label: "Contacts" },
   { href: "/admin/sources", label: "Sources" },
+  { href: "/admin/data", label: "Qualité des données" },
 ];
 
 export function AdminNav({ openReports }: { openReports: number }) {

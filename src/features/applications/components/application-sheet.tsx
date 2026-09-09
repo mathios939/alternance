@@ -9,7 +9,8 @@ import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { APPLICATION_STATUSES, APPLICATION_STATUS_KEYS } from "@/config/taxonomy";
 import type { ApplicationDetailData } from "@/features/applications/types";
 import { ALLOWED_TRANSITIONS } from "@/features/applications/lib/status-machine";
-import { formatDate, formatDateTime, formatRelative } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -138,7 +139,7 @@ export function ApplicationSheet({ applicationId, onClose }: { applicationId: st
                 </div>
                 <div className="space-y-1.5 text-sm">
                   <p className="text-sm font-medium">Dates clés</p>
-                  <p className="text-muted-foreground"><Clock className="mr-1 inline size-3.5" aria-hidden /> Ajoutée {formatRelative(data.createdAt)}</p>
+                  <p className="text-muted-foreground"><Clock className="mr-1 inline size-3.5" aria-hidden /> Ajoutée <RelativeTime date={data.createdAt} /></p>
                   {data.appliedAt ? <p className="text-muted-foreground"><Send className="mr-1 inline size-3.5" aria-hidden /> Envoyée le {formatDate(data.appliedAt)}{data.daysSinceApplied !== null ? ` (il y a ${data.daysSinceApplied} j)` : ""}</p> : null}
                   {data.lastFollowUpAt ? <p className="text-muted-foreground"><RefreshCw className="mr-1 inline size-3.5" aria-hidden /> Relancée le {formatDate(data.lastFollowUpAt)} ({data.followUpCount}×)</p> : null}
                 </div>
@@ -240,7 +241,7 @@ export function ApplicationSheet({ applicationId, onClose }: { applicationId: st
                       <span className="absolute top-1.5 -left-[21px] size-2.5 rounded-full border bg-card" aria-hidden />
                       <span>{EVENT_LABEL[e.type] ?? e.type}</span>
                       {e.type === "STATUS_CHANGED" && e.toStatus ? <Badge variant="muted" className="ml-2 font-normal">{e.fromStatus ? `${APPLICATION_STATUSES[e.fromStatus].short} → ` : ""}{APPLICATION_STATUSES[e.toStatus].short}</Badge> : null}
-                      <span className="block text-xs text-muted-foreground">{formatRelative(e.createdAt)}</span>
+                      <span className="block text-xs text-muted-foreground"><RelativeTime date={e.createdAt} /></span>
                     </li>
                   ))}
                 </ol>

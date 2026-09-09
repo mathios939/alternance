@@ -44,6 +44,7 @@ enum RemotePolicy {
   NONE
   HYBRID
   FULL
+  UNKNOWN
 }
 
 enum WorkRhythm {
@@ -119,14 +120,38 @@ enum DataOrigin {
   DEMO
   ESTIMATED
   AI_GENERATED
+  UNKNOWN
 }
 
 enum JobSourceType {
   FRANCE_TRAVAIL
   COMPANY_CAREER
+  ATS
   MANUAL
   PARTNER
   OTHER
+}
+
+/// Statut de vérification d'une offre (Phase 7) : jamais « active » sans vérification datée.
+enum JobVerificationStatus {
+  ACTIVE
+  UNKNOWN
+  EXPIRED
+  REMOVED
+}
+
+enum SalaryPeriod {
+  HOUR
+  MONTH
+  YEAR
+}
+
+enum IngestionStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  ERROR
+  SKIPPED
 }
 
 enum SyncStatus {
@@ -217,6 +242,7 @@ enum ContactSource {
   PUBLIC_PROFILE
   PRESS
   USER_PROVIDED
+  JOB_POSTING
   DEMO
 }
 
@@ -531,25 +557,40 @@ model ResumeVersion {
 // ═══════════════════════ ENTREPRISES ═════════════════════════
 
 model Company {
-  id          String      @id @default(cuid())
-  slug        String      @unique
-  name        String
-  description String?
-  sector      String // clé taxonomie
-  size        CompanySize
-  headcount   Int?
-  website     String?
-  careersUrl  String?
-  linkedinUrl String?
-  logoUrl     String?
-  foundedYear Int?
+  id             String      @id @default(cuid())
+  slug           String      @unique
+  name           String
+  /// Nom normalisé (sans accents, sans forme juridique) pour le rapprochement offre ↔ entreprise.
+  nameNormalized String?
+  legalName      String?
+  brandName      String?
+  description    String?
+  sector         String // clé taxonomie
+  size           CompanySize
+  headcount      Int?
+  website        String?
+  careersUrl     String?
+  linkedinUrl    String?
+  logoUrl        String?
+  foundedYear    Int?
 
+  address    String?
   city       String
   postalCode String?
   department String?
   region     String?
   latitude   Float?
   longitude  Float?
+
+  // Identité légale (données publiques SIRENE, jamais inventées)
+  siren              String?
+  siret              String? // siège
+  nafCode            String?
+  nafLabel           String?
+  legalCategory      String?
+  employeeRange      String? // code tranche INSEE (ex. « 12 »)
+  employeeRangeLabel String?
+  registeredAt       DateTime? // date de création légale
 
   technologies String[]
   jobFamilies  String[] // métiers recrutés (clés taxonomie)
@@ -559,10 +600,17 @@ model Company {
   isHiring                Boolean   @default(false)
   lastActivityAt          DateTime?
 
-  dataOrigin DataOrigin @default(DEMO)
-  isDemo     Boolean    @default(true)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  dataOrigin     DataOrigin @default(DEMO)
+  isDemo         Boolean    @default(true)
+  /// Provenance de la taille (REAL = tranche d'effectif SIRENE, ESTIMATED = déduite, UNKNOWN = inconnue).
+  sizeOrigin     DataOrigin @default(DEMO)
+  /// Entreprise « Employeur non communiqué » créée pour les offres anonymes : jamais listée.
+  isPlaceholder  Boolean    @default(false)
+  /// Provenance : liste de { source, url, fetchedAt } (Phase 13).
+  dataSources    Json?
+  lastVerifiedAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   locations    CompanyLocation[]
   contacts     Contact[]
@@ -582,6 +630,9 @@ model Company {
   @@index([region])
   @@index([size])
   @@index([latitude, longitude])
+  @@index([siren])
+  @@index([nameNormalized])
+  @@index([isDemo])
   @@map("company")
 }
 
@@ -604,25 +655,35 @@ model CompanyLocation {
 }
 
 model Contact {
-  id              String        @id @default(cuid())
-  companyId       String
-  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  firstName       String
-  lastName        String
-  jobTitle        String
-  department      String?
-  linkedinUrl     String?
-  email           String?
-  source          ContactSource @default(DEMO)
-  sourceUrl       String?
-  verifiedAt      DateTime?
-  confidenceScore Int           @default(0) // 0-100
-  dataOrigin      DataOrigin    @default(DEMO)
-  isDemo          Boolean       @default(true)
-  optOutAt        DateTime? // droit d'opposition RGPD
-  notes           String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                  String        @id @default(cuid())
+  companyId           String
+  company             Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  firstName           String        @default("")
+  lastName            String        @default("")
+  /// Libellé tel que publié par la source quand prénom/nom ne sont pas séparables.
+  displayName         String?
+  jobTitle            String
+  department          String?
+  linkedinUrl         String?
+  email               String?
+  contactUrl          String?
+  /// Offre d'où provient le contact (source JOB_POSTING).
+  jobId               String?
+  job                 Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  source              ContactSource @default(DEMO)
+  sourceUrl           String?
+  /// Information explicitement publique (offre officielle, site de l'entreprise…).
+  publiclyAvailable   Boolean       @default(false)
+  /// Contexte professionnel de publication (ex. « Recrutement pour l'offre X »).
+  professionalContext String?
+  verifiedAt          DateTime?
+  confidenceScore     Int           @default(0) // 0-100
+  dataOrigin          DataOrigin    @default(DEMO)
+  isDemo              Boolean       @default(true)
+  optOutAt            DateTime? // droit d'opposition RGPD
+  notes               String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   applications Application[]
   interviews   Interview[]
@@ -631,22 +692,27 @@ model Contact {
   recos        Recommendation[]
 
   @@index([companyId])
+  @@index([jobId])
   @@map("contact")
 }
 
 // ═══════════════════════════ OFFRES ══════════════════════════
 
 model Job {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  title        String
-  companyId    String
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  description  String
-  missions     String[]
-  requirements String[]
-  benefits     String[]
-  skillsText   String[] // compétences telles qu'écrites dans l'annonce
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  title           String
+  /// Titre normalisé (minuscules, sans accents) pour la recherche et le dédoublonnage.
+  normalizedTitle String?
+  /// Nom de l'entreprise tel qu'écrit dans la source (avant rapprochement).
+  companyNameRaw  String?
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  description     String
+  missions        String[]
+  requirements    String[]
+  benefits        String[]
+  skillsText      String[] // compétences telles qu'écrites dans l'annonce
 
   city       String
   postalCode String?
@@ -662,21 +728,33 @@ model Job {
   rhythm            WorkRhythm?
   salaryMin         Int?
   salaryMax         Int?
+  salaryPeriod      SalaryPeriod?
   remote            RemotePolicy    @default(NONE)
   startDate         DateTime?
   jobFamily         String // clé taxonomie
   sector            String // clé taxonomie
+  romeCode          String?
+  nafCode           String?
+  positionsCount    Int?
 
-  publishedAt    DateTime
-  discoveredAt   DateTime      @default(now())
-  expiresAt      DateTime?
-  source         JobSourceType @default(MANUAL)
-  sourceUrl      String?
-  applicationUrl String?
+  publishedAt      DateTime
+  discoveredAt     DateTime      @default(now())
+  expiresAt        DateTime?
+  source           JobSourceType @default(MANUAL)
+  sourceUrl        String?
+  applicationUrl   String?
+  /// Canal de candidature publié dans l'offre (jamais deviné).
+  applicationEmail String?
+  applicationLabel String?
 
   isActive   Boolean    @default(true)
   isDemo     Boolean    @default(true)
   dataOrigin DataOrigin @default(DEMO)
+
+  // Vérification (Phase 7) et qualité (Phase 16)
+  verificationStatus JobVerificationStatus @default(UNKNOWN)
+  lastVerifiedAt     DateTime?
+  dataQualityScore   Int? // 0-100
 
   // Déduplication : une offre non canonique pointe vers sa version canonique
   canonicalJobId      String?
@@ -691,6 +769,7 @@ model Job {
 
   skills        JobSkill[]
   sourceEntries JobSourceEntry[]
+  contacts      Contact[]
   applications  Application[]
   favorites     Favorite[]
   reports       Report[]
@@ -710,6 +789,9 @@ model Job {
   @@index([isActive, canonicalJobId])
   @@index([latitude, longitude])
   @@index([educationLevelMin, educationLevelMax])
+  @@index([verificationStatus])
+  @@index([lastVerifiedAt])
+  @@index([isDemo])
   @@map("job")
 }
 
@@ -738,28 +820,70 @@ model JobSource {
   lastSyncError  String?
   jobsCount      Int           @default(0)
   config         Json?
+  /// Priorité pour choisir la source canonique de candidature (plus haut = préféré).
+  priority       Int           @default(50)
+  capabilities   Json?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   entries JobSourceEntry[]
+  runs    IngestionRun[]
 
   @@map("job_source")
 }
 
+/// Journal d'ingestion (Phase 3) : une ligne par exécution d'une source.
+model IngestionRun {
+  id             String          @id @default(cuid())
+  sourceKey      String
+  sourceId       String?
+  source         JobSource?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  trigger        String          @default("manual") // cli | cron | admin | test
+  params         Json?
+  startedAt      DateTime        @default(now())
+  finishedAt     DateTime?
+  durationMs     Int?
+  status         IngestionStatus @default(RUNNING)
+  fetchedCount   Int             @default(0)
+  createdCount   Int             @default(0)
+  updatedCount   Int             @default(0)
+  duplicateCount Int             @default(0)
+  rejectedCount  Int             @default(0)
+  failedCount    Int             @default(0)
+  expiredCount   Int             @default(0)
+  errorSummary   String?
+  errors         Json?
+
+  @@index([sourceKey, startedAt])
+  @@map("ingestion_run")
+}
+
 model JobSourceEntry {
-  id          String    @id @default(cuid())
-  jobId       String
-  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  sourceId    String
-  source      JobSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  externalId  String
-  url         String?
-  rawPayload  Json?
-  firstSeenAt DateTime  @default(now())
-  lastSeenAt  DateTime  @default(now())
+  id                  String                @id @default(cuid())
+  jobId               String
+  job                 Job                   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sourceId            String
+  source              JobSource             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  externalId          String
+  url                 String?
+  applicationUrl      String?
+  applicationEmail    String?
+  applicationLabel    String?
+  rawPayload          Json?
+  publishedAt         DateTime?
+  expiresAt           DateTime?
+  /// Statut propre à cette source (une offre peut être retirée d'une source et rester sur une autre).
+  status              JobVerificationStatus @default(ACTIVE)
+  lastVerifiedAt      DateTime?
+  /// Confiance (0-1) du rapprochement avec l'offre canonique quand l'entrée vient d'une autre source.
+  duplicateConfidence Float?
+  isPrimary           Boolean               @default(false)
+  firstSeenAt         DateTime              @default(now())
+  lastSeenAt          DateTime              @default(now())
 
   @@unique([sourceId, externalId])
   @@index([jobId])
+  @@index([status, lastSeenAt])
   @@map("job_source_entry")
 }
 

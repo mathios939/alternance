@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { Button } from "@/components/ui/button";
 import { markAllNotificationsRead, markNotificationRead } from "@/features/notifications/server/actions";
 import type { NotificationItem } from "./notification-center";
@@ -28,7 +28,7 @@ export function NotificationList({ items }: { items: NotificationItem[] }) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">{n.title}</p>
               {n.body ? <p className="text-sm text-muted-foreground">{n.body}</p> : null}
-              <p className="text-xs text-muted-foreground">{formatRelative(n.createdAt)}</p>
+              <p className="text-xs text-muted-foreground"><RelativeTime date={n.createdAt} /></p>
             </div>
             <div className="flex shrink-0 gap-1">
               {n.href ? <Button asChild size="sm" variant="outline"><Link href={n.href} onClick={() => { if (!n.readAt) void markNotificationRead(n.id); }}>Ouvrir</Link></Button> : null}

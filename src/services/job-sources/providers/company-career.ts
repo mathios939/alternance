@@ -1,5 +1,5 @@
 import { createLogger } from "@/lib/logger";
-import type { FetchParams, JobSourceProvider, ProviderStatus, RawJob } from "../types";
+import type { FetchPage, FetchParams, JobSourceProvider, ProviderCapabilities, ProviderStatus, RawJob } from "../types";
 
 const log = createLogger("job-sources:company-career");
 
@@ -19,6 +19,18 @@ export class CompanyCareerProvider implements JobSourceProvider {
   readonly key = "company-career";
   readonly name = "Sites carrières partenaires";
   readonly type = "COMPANY_CAREER" as const;
+  /** Page carrière officielle : source de candidature préférée (Phase 6). */
+  readonly priority = 90;
+  readonly capabilities: ProviderCapabilities = {
+    supportsSearch: false,
+    supportsIncrementalSync: false,
+    supportsLocation: false,
+    supportsRadius: false,
+    supportsDetails: false,
+    supportsSalary: false,
+    supportsExpiration: false,
+    supportsVerification: false,
+  };
 
   constructor(private readonly feeds: CareerFeed[] = []) {}
 
@@ -28,17 +40,20 @@ export class CompanyCareerProvider implements JobSourceProvider {
       name: this.name,
       type: this.type,
       configured: this.feeds.length > 0,
-      reason: this.feeds.length === 0 ? "Aucun flux partenaire configuré (voir docs/PROVIDERS.md)" : undefined,
+      missing: this.feeds.length === 0 ? ["CAREER_FEEDS_JSON"] : [],
+      reason: this.feeds.length === 0 ? "Aucun flux partenaire configuré (CAREER_FEEDS_JSON, voir docs/PROVIDERS.md)" : undefined,
     };
   }
 
-  async fetchJobs(params: FetchParams): Promise<RawJob[]> {
+  async fetchJobs(params: FetchParams): Promise<FetchPage> {
     const results: RawJob[] = [];
+    const warnings: string[] = [];
     for (const feed of this.feeds) {
       try {
         const res = await fetch(feed.feedUrl, { headers: { accept: feed.format === "json" ? "application/json" : "application/rss+xml" } });
         if (!res.ok) {
           log.warn("Flux carrière indisponible", { company: feed.companyName, status: res.status });
+          warnings.push(`${feed.companyName} : flux indisponible (${res.status})`);
           continue;
         }
         if (feed.format === "json") {
@@ -50,9 +65,26 @@ export class CompanyCareerProvider implements JobSourceProvider {
         }
       } catch (error) {
         log.error("Erreur de lecture du flux carrière", error, { company: feed.companyName });
+        warnings.push(`${feed.companyName} : ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    return results.slice(0, params.limit ?? 500);
+    const jobs = results.slice(0, params.limit ?? 500);
+    return { jobs, total: results.length, requests: this.feeds.length, warnings };
+  }
+}
+
+/** Flux déclarés dans CAREER_FEEDS_JSON : [{ "companyName", "feedUrl", "format": "json" | "rss", "website" }]. */
+export function parseCareerFeeds(json: string | undefined): CareerFeed[] {
+  if (!json?.trim()) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((f): f is CareerFeed => typeof f === "object" && f !== null && typeof (f as CareerFeed).feedUrl === "string" && typeof (f as CareerFeed).companyName === "string")
+      .map((f) => ({ ...f, format: f.format === "rss" ? "rss" : "json" }));
+  } catch {
+    log.warn("CAREER_FEEDS_JSON invalide : ignoré");
+    return [];
   }
 }
 
@@ -64,7 +96,7 @@ function mapJsonFeedItem(item: Record<string, unknown>, feed: CareerFeed): RawJo
     companyName: feed.companyName,
     companyWebsite: feed.website ?? null,
     description: str("content_text") || str("summary") || str("description"),
-    city: str("city") || str("location"),
+    city: str("city") || str("location") || null,
     publishedAt: item["date_published"] ? new Date(String(item["date_published"])) : new Date(),
     sourceUrl: str("url") || null,
     raw: item,
@@ -85,7 +117,7 @@ function parseRss(xml: string, feed: CareerFeed): RawJob[] {
       companyName: feed.companyName,
       companyWebsite: feed.website ?? null,
       description: pick("description").replace(/<[^>]+>/g, " "),
-      city: pick("location") || "",
+      city: pick("location") || null,
       publishedAt: pick("pubDate") ? new Date(pick("pubDate")) : new Date(),
       sourceUrl: link || null,
     };

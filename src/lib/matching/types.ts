@@ -65,6 +65,10 @@ export type CompanyForMatching = {
   department: string | null;
   region: string | null;
   hiresApprentices: boolean;
+  /** false si l'historique d'alternance est simplement inconnu (fiche SIRENE sans offre connue). */
+  historyKnown?: boolean;
+  /** false si la taille n'est pas renseignée par une source (jamais devinée). */
+  sizeKnown?: boolean;
   apprenticeCountEstimate: number | null;
   isHiring: boolean;
   activeJobsCount: number;
@@ -83,6 +87,8 @@ export type MatchBreakdown = {
 };
 
 export type MatchResult = {
+  /** Critères non renseignés par l'offre : exclus du calcul (UNKNOWN ≠ incompatible). */
+  unknownCriteria: (keyof MatchBreakdown)[];
   total: number;
   breakdown: MatchBreakdown;
   weights: MatchBreakdown;

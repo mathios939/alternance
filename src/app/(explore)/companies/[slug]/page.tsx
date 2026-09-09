@@ -6,7 +6,8 @@ import { siteConfig } from "@/config/site";
 import { COMPANY_SIZES, JOB_FAMILIES, SECTORS, type JobFamilyKey, type SectorKey } from "@/config/taxonomy";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
-import { recommendBestContact } from "@/lib/matching";
+import { recommendBestContact, recommendContactRole } from "@/lib/matching";
+import { CompanyProvenance } from "@/features/companies/components/company-provenance";
 import { getCandidateContext } from "@/features/profile/server/queries";
 import { getCompanyBySlug, getSimilarCompanies, toCompanyCard } from "@/features/companies/server/queries";
 import { toJobCard } from "@/features/jobs/server/queries";
@@ -59,6 +60,7 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
   const enrichment = { favorites: new Map(favs.map((f) => [f.jobId!, f.collection])), applications: new Map(apps.map((a) => [a.jobId!, { id: a.id, status: a.status }])) };
   const jobs = company.jobs.map((j) => toJobCard(j, userCtx, enrichment));
   const recommendation = recommendBestContact(company, { jobFamily: ctx?.profile.jobFamily ?? null }, company.contacts);
+  const roleFallback = recommendation ? null : recommendContactRole(company, { jobFamily: ctx?.profile.jobFamily ?? null }, { postingUrl: company.jobs[0]?.applicationUrl ?? null });
   const sector = SECTORS[company.sector as SectorKey];
   const angle = buildAngle(company, ctx ? { targetJobTitle: ctx.profile.targetJobTitle, skills: ctx.candidate.skills } : null);
 
@@ -73,9 +75,9 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
           <CompanyLogo name={company.name} logoUrl={company.logoUrl} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              {company.isDemo ? <DataBadge kind="DEMO" /> : <DataBadge kind="REAL" />}
+              {company.isDemo ? <DataBadge kind="DEMO" /> : company.dataOrigin === "REAL" ? <DataBadge kind="REAL" /> : <DataBadge kind="UNKNOWN" />}
               {sector ? <Badge variant="muted">{sector.emoji} {sector.label}</Badge> : null}
-              <Badge variant="muted">{COMPANY_SIZES[company.size].label} · {COMPANY_SIZES[company.size].range}</Badge>
+              {company.sizeOrigin === "UNKNOWN" ? <Badge variant="muted">Taille non renseignée</Badge> : <Badge variant="muted">{COMPANY_SIZES[company.size].label} · {company.employeeRangeLabel ?? COMPANY_SIZES[company.size].range}</Badge>}
               {company.hiresApprentices ? <Badge variant="success"><GraduationCap aria-hidden /> Accueille des alternants</Badge> : null}
             </div>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">{company.name}</h1>
@@ -85,6 +87,7 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
               {company.foundedYear ? <span className="inline-flex items-center gap-1"><Calendar className="size-4" aria-hidden /> Créée en {company.foundedYear}</span> : null}
             </p>
             {company.description ? <p className="mt-4 max-w-3xl text-[15px] leading-relaxed">{company.description}</p> : null}
+            <CompanyProvenance company={{ isDemo: company.isDemo, dataOrigin: company.dataOrigin, siren: company.siren, nafLabel: company.nafLabel, dataSources: card.dataSources, lastVerifiedAt: card.lastVerifiedAt }} />
             <div className="mt-4 flex flex-wrap gap-2">
               {company.website ? (
                 <Button asChild variant="outline" size="sm">
@@ -140,7 +143,27 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
           <section id="contacts">
             <SectionHeading title="Contacts publics" description="Uniquement des informations professionnelles issues de sources publiques. Chaque personne peut demander son retrait." />
             {company.contacts.length === 0 ? (
-              <EmptyState compact className="mt-4" icon={Users} title="Aucun contact vérifié disponible" description="Nous n'inventons jamais de coordonnées. Passe par la page carrières ou le formulaire du site." />
+              <div className="mt-4 space-y-4">
+                <EmptyState compact icon={Users} title="Aucun contact nominatif vérifié trouvé" description="Nous n'inventons jamais de nom, d'e-mail ni de téléphone. Voici l'interlocuteur à viser et les canaux officiels connus." />
+                {roleFallback ? (
+                  <div className="rounded-xl border bg-card/60 p-4 text-sm">
+                    <p className="font-medium">Interlocuteur recommandé : {roleFallback.role}</p>
+                    <p className="mt-1 text-muted-foreground">{roleFallback.reason}</p>
+                    {roleFallback.alternatives.length ? <p className="mt-1 text-xs text-muted-foreground">Sinon : {roleFallback.alternatives.join(" · ")}.</p> : null}
+                    {roleFallback.channels.length ? (
+                      <ul className="mt-3 flex flex-wrap gap-2">
+                        {roleFallback.channels.map((ch) => (
+                          <li key={ch.url}>
+                            <Button asChild variant="outline" size="sm"><a href={ch.url} target="_blank" rel="noopener noreferrer">{ch.label} <ExternalLink /></a></Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 text-xs text-muted-foreground">Aucun canal public connu pour cette entreprise : cherche sa page contact officielle.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {recommendation ? <ContactCard contact={recommendation.contact as never} recommended reason={recommendation.reason} className="md:col-span-2" /> : null}

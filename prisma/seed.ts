@@ -14,7 +14,9 @@ import { analyzeResume } from "../src/features/resume/lib/analyze";
 import { parseResumeText } from "../src/features/resume/lib/parse";
 import { JOB_FAMILIES } from "../src/config/taxonomy";
 import { skillSlugs } from "../src/lib/skills";
+import { normalizeCompanyName } from "../src/lib/text/normalize";
 import { slugify } from "../src/lib/utils";
+import { normalizeJobTitle } from "../src/services/job-sources/normalize";
 import { SEED_COMPANIES } from "./seed-data/companies";
 import { ADMIN_USER, DEMO_RESUME_TEXT, DEMO_USER } from "./seed-data/demo-user";
 import { pickBenefits, templatesFor } from "./seed-data/job-templates";
@@ -115,6 +117,7 @@ async function seedCompanies() {
     const company = await prisma.company.create({
       data: {
         name: c.name,
+        nameNormalized: normalizeCompanyName(c.name),
         slug: c.slug,
         description: c.description,
         sector: c.sector,
@@ -136,7 +139,9 @@ async function seedCompanies() {
         isHiring: c.isHiring,
         lastActivityAt: daysAgo(between(1, 60)),
         dataOrigin: "DEMO",
+        sizeOrigin: "DEMO",
         isDemo: true,
+        dataSources: [{ source: "seed", url: null, fetchedAt: new Date().toISOString(), label: "Données de démonstration" }],
         locations: {
           create: [
             { label: "Siège", city: city.name, postalCode: city.postalCode, department: city.department, region: city.region, latitude: jitter(city.lat), longitude: jitter(city.lng), isHeadquarters: true },
@@ -213,6 +218,8 @@ async function seedJobs(companyIds: Map<string, string>, skillIds: Map<string, s
         data: {
           slug: `${slugify(`${title}-${c.name}-${location.city}`)}-${(count + 1).toString(36)}`,
           title,
+          normalizedTitle: normalizeJobTitle(title),
+          companyNameRaw: c.name,
           companyId,
           description,
           missions: tpl.missions,

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { FileText, MoreHorizontal, Plus, Star, Trash2, PenLine } from "lucide-react";
 import type { ResumeSummary } from "@/features/resume/server/queries";
 import { cn } from "@/lib/utils";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -63,7 +63,7 @@ export function ResumeList({ resumes, selectedId }: { resumes: ResumeSummary[]; 
               <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><FileText className="size-4" aria-hidden /></span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{r.title}{r.isDefault ? <Star className="ml-1 inline size-3 fill-warning text-warning" aria-label="Par défaut" /> : null}</span>
-                <span className="block truncate text-xs text-muted-foreground">{r.latest ? `v${r.latest.version} · ${r.latest.score !== null ? `${r.latest.score}/100` : "non analysé"} · ${formatRelative(r.latest.createdAt)}` : "Aucun fichier"}</span>
+                <span className="block truncate text-xs text-muted-foreground">{r.latest ? <>v{r.latest.version} · {r.latest.score !== null ? `${r.latest.score}/100` : "non analysé"} · <RelativeTime date={r.latest.createdAt} /></> : "Aucun fichier"}</span>
               </span>
             </Link>
             {r.latest?.score !== null && r.latest?.score !== undefined ? <Badge variant={r.latest.score >= 80 ? "success" : r.latest.score >= 60 ? "soft" : "warning"} className="tabular-nums">{r.latest.score}</Badge> : null}

@@ -50,6 +50,10 @@ Ces fonctions sont **pures** : aucun accès base, ce qui les rend testables (`te
 
 ## Agrégation des offres
 
+Pipeline `src/services/ingestion` (SOURCE → FETCH → VALIDATION → NORMALIZATION → DEDUPLICATION → ENRICHMENT → DATABASE), providers `src/services/job-sources` avec capabilities et priorité, journal `IngestionRun`, vérification et expiration périodiques, commandes CLI `scripts/jobs-*.ts` et routes `/api/cron/*`. Les entreprises réelles proviennent des offres officielles et de l'open data SIRENE (`src/services/company-data`). Mode démonstration : `DEMO_MODE=false` masque tout ce qui est `isDemo` via `src/lib/demo-mode.ts` (`visibleJobsWhere`, `visibleCompaniesWhere`). Détails : `docs/PROVIDERS.md`.
+
+### Ancien texte
+
 `services/job-sources` :
 
 1. `JobSourceProvider.fetchJobs()` renvoie des `RawJob` (format du fournisseur).

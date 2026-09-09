@@ -171,9 +171,9 @@ export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilter
       </div>
 
       <Sheet open={mobileOpen && !isDesktop} onOpenChange={(o) => { setMobileOpen(o); if (!o) void setSelectedSlug(null); }}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetContent side="right" className="w-full max-w-none overflow-y-auto sm:max-w-xl" aria-describedby={undefined}>
           <SheetTitle className="sr-only">Détail de l'offre</SheetTitle>
-          <div className="p-5 pt-12">
+          <div className="p-4 pt-12 sm:p-5">
             <Button variant="ghost" size="sm" className="mb-3 -ml-2" onClick={() => setMobileOpen(false)}>
               <ArrowLeft /> Retour aux résultats
             </Button>

@@ -105,3 +105,48 @@ export function recommendBestContact(
   scored.sort((a, b) => b.score - a.score);
   return scored[0] ?? null;
 }
+
+
+export type ContactRoleRecommendation = {
+  role: string;
+  alternatives: string[];
+  reason: string;
+  /** Canaux publics à privilégier, dans l'ordre. */
+  channels: Array<{ kind: "careers" | "website" | "linkedin" | "posting"; label: string; url: string }>;
+};
+
+/**
+ * Interlocuteur recommandé SANS nom (Phase 12) : quand aucun contact vérifié n'existe,
+ * le produit reste utile en indiquant la fonction à viser et les canaux officiels.
+ * Aucune adresse n'est devinée ; seuls les liens réellement connus sont proposés.
+ */
+export function recommendContactRole(
+  company: { size: CompanySize; name: string; website?: string | null; careersUrl?: string | null; linkedinUrl?: string | null },
+  candidate: { jobFamily: string | null },
+  options: { postingUrl?: string | null } = {},
+): ContactRoleRecommendation {
+  const familyLabel = candidate.jobFamily ? (JOB_FAMILIES[candidate.jobFamily as JobFamilyKey]?.label ?? candidate.jobFamily) : null;
+  const teamLabel = familyLabel ? `responsable de l'équipe ${familyLabel.toLowerCase()}` : "responsable de l'équipe visée";
+  let role: string;
+  let alternatives: string[];
+  let reason: string;
+  if (company.size === "GE" || company.size === "ETI") {
+    role = "Responsable recrutement / Talent Acquisition";
+    alternatives = ["Chargé·e de recrutement alternance ou relations écoles", teamLabel];
+    reason = `Dans une structure de la taille de ${company.name}, les candidatures d'alternants passent par l'équipe recrutement.`;
+  } else if (company.size === "PME") {
+    role = `Responsable RH ou ${teamLabel}`;
+    alternatives = ["Direction générale"];
+    reason = "Dans une PME, le manager de l'équipe décide souvent lui-même des recrutements d'alternants.";
+  } else {
+    role = "Dirigeant·e ou responsable technique";
+    alternatives = [teamLabel];
+    reason = "Dans une TPE, la décision revient généralement au dirigeant.";
+  }
+  const channels: ContactRoleRecommendation["channels"] = [];
+  if (company.careersUrl) channels.push({ kind: "careers", label: "Page carrières officielle", url: company.careersUrl });
+  if (options.postingUrl) channels.push({ kind: "posting", label: "Candidature via l'offre officielle", url: options.postingUrl });
+  if (company.website) channels.push({ kind: "website", label: "Site web / page contact", url: company.website });
+  if (company.linkedinUrl) channels.push({ kind: "linkedin", label: "Page LinkedIn de l'entreprise (lien public)", url: company.linkedinUrl });
+  return { role, alternatives, reason, channels };
+}

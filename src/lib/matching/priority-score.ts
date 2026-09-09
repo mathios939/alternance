@@ -55,7 +55,7 @@ export function distanceScore(distanceKm: number | null, maxRadiusKm: number): n
  * Estime la concurrence sur une offre (0 → 100).
  * Heuristique documentée : grande entreprise + grande ville + offre ancienne = plus de candidats.
  */
-export function estimateCompetition(input: { companySize: "TPE" | "PME" | "ETI" | "GE"; cityPopulation?: number; hoursSincePublished: number; remote: "NONE" | "HYBRID" | "FULL" }): number {
+export function estimateCompetition(input: { companySize: "TPE" | "PME" | "ETI" | "GE"; cityPopulation?: number; hoursSincePublished: number; remote?: "NONE" | "HYBRID" | "FULL" | "UNKNOWN" }): number {
   let c = { TPE: 20, PME: 35, ETI: 55, GE: 75 }[input.companySize];
   if ((input.cityPopulation ?? 0) > 500_000) c += 15;
   else if ((input.cityPopulation ?? 0) > 150_000) c += 8;

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Bell, BellRing, Briefcase, Building2, CalendarClock, CheckCheck, Info, RefreshCw, Sparkles } from "lucide-react";
 import type { NotificationType } from "@/generated/prisma/enums";
 import { cn } from "@/lib/utils";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { markAllNotificationsRead, markNotificationRead } from "@/features/notifications/server/actions";
@@ -68,7 +68,7 @@ export function NotificationCenter({ items, unread }: { items: NotificationItem[
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium">{n.title}</span>
                       {n.body ? <span className="block truncate text-xs text-muted-foreground">{n.body}</span> : null}
-                      <span className="block text-[11px] text-muted-foreground">{formatRelative(n.createdAt)}</span>
+                      <span className="block text-[11px] text-muted-foreground"><RelativeTime date={n.createdAt} /></span>
                     </span>
                     {!n.readAt ? <span className="mt-2 size-2 shrink-0 rounded-full bg-primary" aria-label="Non lue" /> : null}
                   </button>

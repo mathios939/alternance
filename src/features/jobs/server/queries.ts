@@ -13,6 +13,7 @@ import {
   type MatchResult,
 } from "@/lib/matching";
 import { getSearchProvider } from "@/lib/search";
+import { demoFilter } from "@/lib/demo-mode";
 import { createLogger } from "@/lib/logger";
 import { CITIES } from "@/config/cities";
 import { type JobFilters, publishedWithinToDate } from "@/features/jobs/lib/filters";
@@ -23,9 +24,27 @@ const PAGE_SIZE = 20;
 const MAX_CANDIDATES = 600;
 
 export const jobCardInclude = {
-  company: { select: { id: true, slug: true, name: true, logoUrl: true, size: true, sector: true, city: true } },
+  company: { select: { id: true, slug: true, name: true, logoUrl: true, size: true, sector: true, city: true, isPlaceholder: true } },
   skills: { include: { skill: { select: { slug: true, name: true } } } },
+  _count: { select: { sourceEntries: { where: { status: { in: ["ACTIVE", "UNKNOWN"] } } } } },
 } satisfies Prisma.JobInclude;
+
+/** Offres visibles : actives, canoniques, non expirées, et hors démo si DEMO_MODE=false. */
+export function visibleJobsWhere(): Prisma.JobWhereInput {
+  return { isActive: true, canonicalJobId: null, verificationStatus: { notIn: ["EXPIRED", "REMOVED"] }, ...demoFilter() };
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  FRANCE_TRAVAIL: "France Travail",
+  COMPANY_CAREER: "Site carrières de l'entreprise",
+  ATS: "Site carrières (ATS)",
+  MANUAL: "Base Alternance OS",
+  PARTNER: "Partenaire",
+  OTHER: "Autre source",
+};
+
+/** Rayon par défaut (km) quand une ville est donnée sans rayon : géographique, pas une égalité de chaînes. */
+const DEFAULT_CITY_RADIUS_KM = 15;
 
 export type JobWithCard = Prisma.JobGetPayload<{ include: typeof jobCardInclude }>;
 
@@ -104,12 +123,17 @@ export function toJobCard(job: JobWithCard, ctx: UserContext, enrichment?: Enric
     durationMonths: job.durationMonths,
     salaryMin: job.salaryMin,
     salaryMax: job.salaryMax,
+    salaryPeriod: job.salaryPeriod,
     skills: job.skills.map((s) => ({ slug: s.skill.slug, name: s.skill.name, required: s.required })),
     jobFamily: job.jobFamily,
     sector: job.sector,
     isDemo: job.isDemo,
     dataOrigin: job.dataOrigin,
-    company: { id: job.company.id, slug: job.company.slug, name: job.company.name, logoUrl: job.company.logoUrl, size: job.company.size, sector: job.company.sector },
+    verificationStatus: job.verificationStatus,
+    lastVerifiedAt: job.lastVerifiedAt?.toISOString() ?? null,
+    sourceLabel: SOURCE_LABELS[job.source] ?? job.source,
+    sourceCount: Math.max(1, job._count.sourceEntries),
+    company: { id: job.company.id, slug: job.company.slug, name: job.company.name, logoUrl: job.company.logoUrl, size: job.company.size, sector: job.company.sector, isPlaceholder: job.company.isPlaceholder },
     match,
     distanceKm,
     priority,
@@ -135,24 +159,27 @@ function computePriority(candidate: CandidateForMatching, job: JobWithCard, matc
 }
 
 function buildWhere(filters: JobFilters): { where: Prisma.JobWhereInput; center: { lat: number; lng: number; radius: number } | null } {
-  const where: Prisma.JobWhereInput = { isActive: true, canonicalJobId: null };
+  const where: Prisma.JobWhereInput = visibleJobsWhere();
   const and: Prisma.JobWhereInput[] = [];
   let center: { lat: number; lng: number; radius: number } | null = null;
 
   const city = filters.city ? findCity(filters.city) : undefined;
   if (filters.city) {
-    if (city && filters.radius) {
-      center = { lat: city.lat, lng: city.lng, radius: filters.radius };
-      const box = boundingBox({ lat: city.lat, lng: city.lng }, filters.radius);
+    if (city) {
+      // Ville connue : filtre géographique réel (rayon explicite ou rayon par défaut), plus les offres
+      // sans coordonnées portant exactement ce nom de ville, plus le télétravail complet.
+      const radius = filters.radius ?? DEFAULT_CITY_RADIUS_KM;
+      center = { lat: city.lat, lng: city.lng, radius };
+      const box = boundingBox({ lat: city.lat, lng: city.lng }, radius);
       and.push({
         OR: [
           { latitude: { gte: box.minLat, lte: box.maxLat }, longitude: { gte: box.minLng, lte: box.maxLng } },
-          { city: { equals: city.name, mode: "insensitive" } },
+          { latitude: null, city: { equals: city.name, mode: "insensitive" } },
           { remote: "FULL" },
         ],
       });
     } else {
-      and.push({ city: { equals: city?.name ?? filters.city, mode: "insensitive" } });
+      and.push({ city: { equals: filters.city, mode: "insensitive" } });
     }
   }
   if (filters.department) and.push({ department: { equals: filters.department, mode: "insensitive" } });
@@ -249,7 +276,7 @@ export const getJobBySlug = cache(async (slug: string) => {
     include: {
       ...jobCardInclude,
       company: true,
-      sourceEntries: { include: { source: { select: { name: true, type: true } } } },
+      sourceEntries: { include: { source: { select: { key: true, name: true, type: true, priority: true } } }, orderBy: [{ isPrimary: "desc" }, { firstSeenAt: "asc" }] },
       duplicates: { select: { id: true, sourceUrl: true, source: true } },
     },
   });
@@ -270,7 +297,7 @@ export async function getTopMatches(ctx: Required<Pick<UserContext, "userId" | "
   const minScore = options?.minScore ?? 0;
   const candidate = ctx.candidate;
   if (!candidate) return [];
-  const where: Prisma.JobWhereInput = { isActive: true, canonicalJobId: null };
+  const where: Prisma.JobWhereInput = visibleJobsWhere();
   if (candidate.latitude !== null && candidate.longitude !== null && candidate.mobility !== "NATIONAL") {
     const box = boundingBox({ lat: candidate.latitude, lng: candidate.longitude }, Math.max(candidate.maxRadiusKm * 1.5, 40));
     where.OR = [
@@ -297,7 +324,7 @@ export async function getTopMatches(ctx: Required<Pick<UserContext, "userId" | "
 }
 
 export async function countNewJobs(ctx: { candidate: CandidateForMatching | null }, sinceHours = 24): Promise<number> {
-  const where: Prisma.JobWhereInput = { isActive: true, canonicalJobId: null, publishedAt: { gte: new Date(Date.now() - sinceHours * 3_600_000) } };
+  const where: Prisma.JobWhereInput = { ...visibleJobsWhere(), publishedAt: { gte: new Date(Date.now() - sinceHours * 3_600_000) } };
   const c = ctx.candidate;
   if (c?.latitude !== null && c?.latitude !== undefined && c.longitude !== null && c.mobility !== "NATIONAL") {
     const box = boundingBox({ lat: c.latitude, lng: c.longitude }, c.maxRadiusKm);
@@ -308,27 +335,27 @@ export async function countNewJobs(ctx: { candidate: CandidateForMatching | null
 }
 
 export const getRecentJobs = cache(async (limit = 6): Promise<JobCardData[]> => {
-  const jobs = await prisma.job.findMany({ where: { isActive: true, canonicalJobId: null }, include: jobCardInclude, orderBy: { publishedAt: "desc" }, take: limit });
+  const jobs = await prisma.job.findMany({ where: visibleJobsWhere(), include: jobCardInclude, orderBy: { publishedAt: "desc" }, take: limit });
   return jobs.map((j) => toJobCard(j, { candidate: null }));
 });
 
 export const getJobStats = cache(async () => {
   const [jobs, companies, cities, last24h] = await Promise.all([
-    prisma.job.count({ where: { isActive: true, canonicalJobId: null } }),
-    prisma.company.count(),
-    prisma.job.groupBy({ by: ["city"], where: { isActive: true } }).then((g) => g.length),
-    prisma.job.count({ where: { isActive: true, publishedAt: { gte: new Date(Date.now() - 86_400_000) } } }),
+    prisma.job.count({ where: visibleJobsWhere() }),
+    prisma.company.count({ where: { isPlaceholder: false, ...demoFilter() } }),
+    prisma.job.groupBy({ by: ["city"], where: visibleJobsWhere() }).then((g) => g.length),
+    prisma.job.count({ where: { ...visibleJobsWhere(), publishedAt: { gte: new Date(Date.now() - 86_400_000) } } }),
   ]);
   return { jobs, companies, cities, last24h };
 });
 
 export async function getJobsForCityPage(cityName: string, options?: { family?: string; limit?: number }) {
-  const where: Prisma.JobWhereInput = { isActive: true, canonicalJobId: null, city: { equals: cityName, mode: "insensitive" } };
+  const where: Prisma.JobWhereInput = { ...visibleJobsWhere(), city: { equals: cityName, mode: "insensitive" } };
   if (options?.family) where.jobFamily = options.family;
   const [jobs, total, byFamily] = await Promise.all([
     prisma.job.findMany({ where, include: jobCardInclude, orderBy: { publishedAt: "desc" }, take: options?.limit ?? 24 }),
     prisma.job.count({ where }),
-    prisma.job.groupBy({ by: ["jobFamily"], where: { isActive: true, canonicalJobId: null, city: { equals: cityName, mode: "insensitive" } }, _count: { _all: true } }),
+    prisma.job.groupBy({ by: ["jobFamily"], where: { ...visibleJobsWhere(), city: { equals: cityName, mode: "insensitive" } }, _count: { _all: true } }),
   ]);
   return { jobs: jobs.map((j) => toJobCard(j, { candidate: null })), total, byFamily: byFamily.map((f) => ({ family: f.jobFamily, count: f._count._all })).sort((a, b) => b.count - a.count) };
 }
@@ -348,14 +375,6 @@ export async function getJobsByIds(ids: string[], ctx: UserContext): Promise<Job
   const byId = new Map(jobs.map((j) => [j.id, j]));
   return ids.map((id) => byId.get(id)).filter((j): j is JobWithCard => Boolean(j)).map((j) => toJobCard(j, ctx, enrichment));
 }
-
-const SOURCE_LABELS: Record<string, string> = {
-  FRANCE_TRAVAIL: "France Travail",
-  COMPANY_CAREER: "Site carrières de l'entreprise",
-  MANUAL: "Base Alternance OS",
-  PARTNER: "Partenaire",
-  OTHER: "Autre source",
-};
 
 /** Détail complet d'une offre, enrichi du score et des trajets si un profil existe. */
 export async function getJobDetail(slug: string, ctx: UserContext & { profile?: { latitude: number | null; longitude: number | null; schoolLatitude: number | null; schoolLongitude: number | null } | null }): Promise<JobDetailData | null> {
@@ -392,10 +411,15 @@ export async function getJobDetail(slug: string, ctx: UserContext & { profile?: 
     longitude: job.longitude,
     sourceUrl: job.sourceUrl,
     applicationUrl: job.applicationUrl,
+    applicationEmail: job.applicationEmail,
+    applicationLabel: job.applicationLabel,
     sourceName: job.sourceEntries[0]?.source.name ?? SOURCE_LABELS[job.source] ?? job.source,
+    sources: job.sourceEntries.map((e) => ({ key: e.source.key, name: e.source.name, url: e.url, applicationUrl: e.applicationUrl, isPrimary: e.isPrimary, status: e.status, lastVerifiedAt: e.lastVerifiedAt?.toISOString() ?? null })),
     otherSources: job.duplicates.map((d) => ({ name: SOURCE_LABELS[d.source] ?? d.source, url: d.sourceUrl })),
+    dataQualityScore: job.dataQualityScore,
     viewCount: job.viewCount,
     companyDetail: {
+      sizeOrigin: job.company.sizeOrigin,
       description: job.company.description,
       website: job.company.website,
       careersUrl: job.company.careersUrl,

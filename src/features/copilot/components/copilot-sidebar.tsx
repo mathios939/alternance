@@ -6,7 +6,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { FileText, MessageSquare, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { Button } from "@/components/ui/button";
 import { deleteConversation, deleteDocument } from "@/features/copilot/server/actions";
 
@@ -39,7 +39,7 @@ export function CopilotSidebar({ conversations, documents, activeId, activeDocId
                 <MessageSquare className="size-4 shrink-0 opacity-70" aria-hidden />
                 <span className="min-w-0">
                   <span className="block truncate">{c.title}</span>
-                  <span className="block text-[11px] text-muted-foreground">{formatRelative(c.updatedAt)}</span>
+                  <span className="block text-[11px] text-muted-foreground"><RelativeTime date={c.updatedAt} /></span>
                 </span>
               </Link>
               <button type="button" onClick={() => remove(() => deleteConversation(c.id))} disabled={pending} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Supprimer la conversation"><Trash2 className="size-3.5" /></button>
@@ -57,7 +57,7 @@ export function CopilotSidebar({ conversations, documents, activeId, activeDocId
                 <FileText className="size-4 shrink-0 opacity-70" aria-hidden />
                 <span className="min-w-0">
                   <span className="block truncate">{d.title}</span>
-                  <span className="block text-[11px] text-muted-foreground">{formatRelative(d.createdAt)}{d.provider === "mock" ? " · démo" : ""}</span>
+                  <span className="block text-[11px] text-muted-foreground"><RelativeTime date={d.createdAt} />{d.provider === "mock" ? " · démo" : ""}</span>
                 </span>
               </Link>
               <button type="button" onClick={() => remove(() => deleteDocument(d.id))} disabled={pending} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Supprimer le document"><Trash2 className="size-3.5" /></button>

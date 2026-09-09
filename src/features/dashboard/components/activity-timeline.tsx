@@ -1,6 +1,6 @@
 import { Briefcase, Bookmark, FileText, KanbanSquare, MessageSquare, RefreshCw, Sparkles, UserRound, CalendarClock, CheckCircle2, Eye, Bot } from "lucide-react";
 import type { ActivityType } from "@/generated/prisma/enums";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { EmptyState } from "@/components/shared/empty-state";
 
 const ICONS: Record<ActivityType, typeof Briefcase> = {
@@ -31,7 +31,7 @@ export function ActivityTimeline({ items }: { items: Array<{ id: string; type: A
               <Icon className="size-2.5 text-muted-foreground" aria-hidden />
             </span>
             <p className="text-sm">{a.title}</p>
-            <p className="text-xs text-muted-foreground">{formatRelative(a.createdAt)}</p>
+            <p className="text-xs text-muted-foreground"><RelativeTime date={a.createdAt} /></p>
           </li>
         );
       })}

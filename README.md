@@ -11,6 +11,7 @@ Expérience poussée pour les **Pays de la Loire** (Nantes, Saint-Nazaire, Anger
 
 ## Sommaire
 
+- [Données réelles](#données-réelles)
 1. [Fonctionnalités opérationnelles](#fonctionnalités-opérationnelles)
 2. [Stack technique](#stack-technique)
 3. [Installation](#installation)
@@ -27,6 +28,25 @@ Expérience poussée pour les **Pays de la Loire** (Nantes, Saint-Nazaire, Anger
 14. [Feuille de route](#feuille-de-route)
 
 ---
+
+## Données réelles
+
+La plateforme fonctionne avec de vraies offres dès qu'une source est configurée. Chaque donnée porte sa provenance : `REAL` (source vérifiable), `DEMO` (seed), `ESTIMATED` (règles), `AI_GENERATED`, `UNKNOWN` (aucune source). **Une absence de donnée est préférée à une donnée inventée.**
+
+```bash
+# 1. Identifiants France Travail dans .env (voir docs/PROVIDERS.md), puis :
+npm run test:france-travail -- --q developpeur --city Nantes --radius 30   # auth → recherche → stockage → dédoublonnage → vérification
+npm run jobs:sync                          # départements prioritaires (44, 49, 53, 72, 85, 35, 29, 56, 22), 31 jours
+npm run jobs:sync -- --q developpeur --city Nantes --radius 30
+npm run jobs:verify                        # re-vérifie l'existence des offres auprès de la source
+npm run jobs:expire                        # règles d'expiration (14 j → « non re-vérifiée », 45 j → expirée)
+npm run companies:import -- --department 44 --family dev   # entreprises réelles (SIRENE) par département et NAF
+
+# 2. Masquer la démonstration
+DEMO_MODE=false  NEXT_PUBLIC_DEMO_MODE=false
+```
+
+Ce que l'utilisateur voit : la source de chaque offre (« France Travail »), sa date de vérification (« Vérifiée il y a 3 h » / « Non re-vérifiée depuis 12 jours »), « Offre trouvée sur N sources » avec la page carrières privilégiée pour candidater, le canal de candidature publié dans l'offre, le score de qualité des données, et pour les entreprises la source (offre officielle, SIRENE), le SIREN et la dernière vérification. La page publique [`/sources`](http://localhost:3000/sources) résume tout ; l'admin `/admin/data` détaille les exécutions (`IngestionRun`), les doublons, les offres non vérifiées et les données de démonstration.
 
 ## Fonctionnalités opérationnelles
 
@@ -163,17 +183,26 @@ Le build exige `DATABASE_URL` (le sitemap interroge la base, avec repli si elle 
 ## Tests
 
 ```bash
-npm run test                       # unitaires : Match Score, opportunité, priorité, prochaine action,
-                                   # contacts, déduplication, filtres & requête naturelle, statuts &
-                                   # relances, analyse CV, complétion, streak (64 tests)
-npm run test:e2e                   # Playwright : parcours critique §69 + smoke des pages
+npm run test                       # unitaires (tests/unit) : Match Score (y compris données incomplètes),
+                                   # opportunité, priorité, prochaine action, contacts, dédoublonnage 0-1,
+                                   # validation & qualité d'ingestion, parseurs France Travail, synonymes,
+                                   # filtres, statuts, relances, analyse CV, complétion, streak
+npm run test:integration           # pipeline d'ingestion contre la base locale + client France Travail simulé
+                                   # (auth, pagination, 204/400/401/429/5xx, timeouts) — DATABASE_URL requis
+npm run test:all                   # unitaires + intégration
+npm run test:e2e                   # Playwright : parcours critique §69 sur desktop ET mobile + smoke des pages
 CHROMIUM_PATH=/chemin/vers/chrome npm run test:e2e   # utiliser un Chromium déjà installé
-npm run smoke                      # smoke navigateur rapide (connexion démo → dashboard → pages) contre un serveur déjà lancé
+npm run smoke                      # smoke navigateur rapide contre un serveur déjà lancé
+
+# Tests externes (réseau et/ou clés requis, jamais lancés par `npm test`)
+npm run test:france-travail        # API France Travail de bout en bout (code 2 si identifiants absents)
+npm run test:ai-provider           # fournisseur IA réel : requête, streaming, erreur, annulation
+npm run test:osrm                  # temps de trajet routé (instance OSRM)
+npm run test:companies             # API Recherche d'entreprises (SIRENE)
+npm run test:external              # enchaîne les quatre
 ```
 
-Le parcours critique testé : accueil → inscription → onboarding → dashboard → recherche « développeur Nantes » → fiche + Match Score → sauvegarde → candidature → Kanban → statut « Envoyée » → relance recommandée.
-
----
+Codes de retour des scripts externes : `0` succès, `1` échec, `2` configuration manquante (la variable manquante est nommée).
 
 ## Architecture
 
@@ -200,17 +229,18 @@ Principes : la logique métier est **pure et testée** (`lib/matching`, `feature
 
 ## Fournisseurs externes
 
-| Domaine | Interface | Implémentations | Sans configuration |
+Détail complet dans [`docs/PROVIDERS.md`](docs/PROVIDERS.md). Règle commune : une intégration non configurée le dit (variable manquante nommée) et **ne simule jamais** ; les données absentes restent vides.
+
+| Domaine | Intégration | Clé | Test |
 |---|---|---|---|
-| IA | `AIProvider` (`lib/ai`) | Anthropic (SDK officiel, `claude-opus-5`), OpenAI-compatible, Mock | mock déterministe (mode démo) |
-| Recherche | `FullTextSearchProvider` (`lib/search`) | PostgreSQL (tsvector + trigram) | — (prêt pour Meilisearch/Typesense/OpenSearch) |
-| Sources d'offres | `JobSourceProvider` (`services/job-sources`) | Manuel, Sites carrières (flux), France Travail (API) | sources désactivées proprement |
-| Trajets | `TravelTimeProvider` (`lib/geo/travel-time`) | OSRM, heuristique | estimation à vol d'oiseau |
-| Carte | style MapLibre | OpenStreetMap, style personnalisé | OpenStreetMap |
-
-Voir [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
-
----
+| Offres | France Travail « Offres d'emploi v2 » (`FranceTravailProvider`) | `FRANCE_TRAVAIL_CLIENT_ID` / `_SECRET` | `npm run test:france-travail` |
+| Offres | Flux carrières fournis (JSON Feed / RSS) | `CAREER_FEEDS_JSON` | — |
+| Entreprises | API Recherche d'entreprises (SIRENE, open data) | aucune | `npm run test:companies` |
+| Contacts | Bloc « contact » des offres officielles uniquement | — | couvert par l'intégration |
+| IA | Anthropic (`claude-opus-5`) ou API compatible OpenAI ; `mock` en démo ; indisponible sinon | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | `npm run test:ai-provider` |
+| Trajets | OSRM (routé) ou heuristique (estimé) | `TRAVEL_TIME_PROVIDER`, `OSRM_BASE_URL` | `npm run test:osrm` |
+| Recherche | PostgreSQL `french_unaccent` + synonymes | — | unitaires |
+| Tâches | CLI `jobs:sync` / `jobs:verify` / `jobs:expire` / `companies:import` et `/api/cron/*` | `CRON_SECRET` | — |
 
 ## Sécurité & RGPD
 

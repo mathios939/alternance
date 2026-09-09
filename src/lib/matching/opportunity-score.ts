@@ -22,6 +22,8 @@ export type OpportunityResult = {
   distanceKm: number | null;
   isEstimate: true;
   level: "hot" | "warm" | "cool";
+  /** Facteurs non documentés par une source (traités comme neutres, jamais comme négatifs). */
+  unknownFactors: string[];
 };
 
 const SIZE_SCORE: Record<CompanyForMatching["size"], number> = { TPE: 55, PME: 100, ETI: 90, GE: 75 };
@@ -76,9 +78,15 @@ export function calculateOpportunityScore(candidate: CandidateForMatching, compa
     if (sector === 100) reasons.push({ kind: "positive", label: "Secteur que tu recherches" });
   }
 
-  // Historique d'alternants (20)
+  const unknownFactors: string[] = [];
+
+  // Historique d'alternants (20) — inconnu ≠ non
   let apprentices = 30;
-  if (company.hiresApprentices) {
+  if (!company.hiresApprentices && company.historyKnown === false) {
+    apprentices = 55;
+    unknownFactors.push("historique d'alternance");
+    reasons.push({ kind: "neutral", label: "Historique d'alternance inconnu", detail: "Aucune source ne l'indique : ni bon ni mauvais signe." });
+  } else if (company.hiresApprentices) {
     apprentices = company.apprenticeCountEstimate && company.apprenticeCountEstimate >= 5 ? 100 : 80;
     reasons.push({
       kind: "positive",
@@ -100,8 +108,12 @@ export function calculateOpportunityScore(candidate: CandidateForMatching, compa
     reasons.push({ kind: "neutral", label: "Aucune offre publiée : candidature spontanée recommandée" });
   }
 
-  // Taille (10)
-  const size = SIZE_SCORE[company.size];
+  // Taille (10) — inconnue = neutre
+  let size = SIZE_SCORE[company.size];
+  if (company.sizeKnown === false) {
+    size = 80;
+    unknownFactors.push("taille");
+  }
 
   let score =
     proximity * 0.25 + family * 0.2 + sector * 0.15 + apprentices * 0.2 + hiring * 0.1 + size * 0.1;
@@ -122,5 +134,6 @@ export function calculateOpportunityScore(candidate: CandidateForMatching, compa
     distanceKm,
     isEstimate: true,
     level: total >= 75 ? "hot" : total >= 55 ? "warm" : "cool",
+    unknownFactors,
   };
 }

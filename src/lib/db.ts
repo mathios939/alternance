@@ -1,4 +1,4 @@
-import "server-only";
+// Module serveur uniquement : importé par les Server Components, les actions et les scripts CLI (jamais côté client).
 import { PrismaClient } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getEnv } from "@/lib/env";

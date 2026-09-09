@@ -1,12 +1,12 @@
-import { BadgeCheck, FlaskConical, Gauge, Sparkles } from "lucide-react";
+import { BadgeCheck, CircleHelp, FlaskConical, Gauge, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-export type DataOriginKind = "REAL" | "DEMO" | "ESTIMATED" | "AI_GENERATED";
+export type DataOriginKind = "REAL" | "DEMO" | "ESTIMATED" | "AI_GENERATED" | "UNKNOWN";
 
 const CONFIG: Record<
   DataOriginKind,
-  { label: string; help: string; variant: "success" | "warning" | "info" | "soft"; icon: typeof BadgeCheck }
+  { label: string; help: string; variant: "success" | "warning" | "info" | "soft" | "muted"; icon: typeof BadgeCheck }
 > = {
   REAL: {
     label: "Donnée vérifiée",
@@ -31,6 +31,12 @@ const CONFIG: Record<
     help: "Contenu généré par l'assistant IA. Relis et personnalise avant envoi.",
     variant: "soft",
     icon: Sparkles,
+  },
+  UNKNOWN: {
+    label: "Provenance inconnue",
+    help: "Aucune source vérifiable pour cette information. Elle n'est pas présentée comme un fait.",
+    variant: "muted",
+    icon: CircleHelp,
   },
 };
 

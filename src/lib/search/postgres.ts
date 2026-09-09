@@ -1,22 +1,16 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { normalizeText } from "@/lib/text/normalize";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
+import { buildTsQuery } from "./synonyms";
 import type { FullTextSearchProvider, SearchHit } from "./types";
 
-function orQuery(query: string): string {
-  return normalizeText(query)
-    .split(/\s+/)
-    .filter((t) => t.length > 1)
-    .map((t) => `${t.replace(/[^a-z0-9]/g, "")}:*`)
-    .filter((t) => t.length > 2)
-    .join(" | ");
-}
-
 /**
- * Recherche PostgreSQL : d'abord une requête stricte (tous les mots),
- * puis élargie (au moins un mot, préfixes) si rien n'est trouvé.
- * Le titre et les compétences sont aussi testés en ILIKE pour la tolérance.
+ * Recherche PostgreSQL insensible aux accents (configuration `french_unaccent`, cf. migration) :
+ *   1. requête stricte (tous les mots, chaque mot étendu à ses synonymes) ;
+ *   2. requête élargie (au moins un mot) si rien n'est trouvé.
+ * Le titre et les compétences sont aussi testés en ILIKE (tolérance aux libellés exotiques).
+ * Les offres expirées / retirées et, hors mode démo, les offres de démonstration sont exclues.
  */
 export class PostgresSearchProvider implements FullTextSearchProvider {
   readonly name = "postgres";
@@ -26,29 +20,36 @@ export class PostgresSearchProvider implements FullTextSearchProvider {
     const q = query.trim();
     if (!q) return [];
     const like = `%${q}%`;
-    const strict = await prisma.$queryRaw<SearchHit[]>(Prisma.sql`
+    const demo = isDemoModeEnabled() ? Prisma.sql`TRUE` : Prisma.sql`"isDemo" = false`;
+    const strict = buildTsQuery(q, { prefix: true, requireAll: true });
+    if (!strict) return [];
+    const doc = Prisma.sql`to_tsvector('french_unaccent'::regconfig, coalesce(title, '') || ' ' || coalesce(description, ''))`;
+    const first = await prisma.$queryRaw<SearchHit[]>(Prisma.sql`
       SELECT id,
-        ts_rank(to_tsvector('french', coalesce(title, '') || ' ' || coalesce(description, '')), plainto_tsquery('french', ${q}))
-          + (CASE WHEN title ILIKE ${like} THEN 0.5 ELSE 0 END)::float AS rank
+        (ts_rank(${doc}, to_tsquery('french_unaccent'::regconfig, ${strict}))
+          + (CASE WHEN unaccent(title) ILIKE unaccent(${like}) THEN 0.5 ELSE 0 END))::float AS rank
       FROM job
       WHERE "isActive" = true
+        AND "verificationStatus" NOT IN ('EXPIRED', 'REMOVED')
+        AND ${demo}
         AND (
-          to_tsvector('french', coalesce(title, '') || ' ' || coalesce(description, '')) @@ plainto_tsquery('french', ${q})
-          OR title ILIKE ${like}
-          OR EXISTS (SELECT 1 FROM unnest("skillsText") s WHERE s ILIKE ${like})
+          ${doc} @@ to_tsquery('french_unaccent'::regconfig, ${strict})
+          OR unaccent(title) ILIKE unaccent(${like})
+          OR EXISTS (SELECT 1 FROM unnest("skillsText") s WHERE unaccent(s) ILIKE unaccent(${like}))
         )
       ORDER BY rank DESC
       LIMIT ${limit}
     `);
-    if (strict.length > 0) return strict;
-    const loose = orQuery(q);
-    if (!loose) return [];
+    if (first.length > 0) return first;
+    const loose = buildTsQuery(q, { prefix: true, requireAll: false });
+    if (!loose || loose === strict) return [];
     return prisma.$queryRaw<SearchHit[]>(Prisma.sql`
-      SELECT id,
-        ts_rank(to_tsvector('french', coalesce(title, '') || ' ' || coalesce(description, '')), to_tsquery('french', ${loose}))::float AS rank
+      SELECT id, ts_rank(${doc}, to_tsquery('french_unaccent'::regconfig, ${loose}))::float AS rank
       FROM job
       WHERE "isActive" = true
-        AND to_tsvector('french', coalesce(title, '') || ' ' || coalesce(description, '')) @@ to_tsquery('french', ${loose})
+        AND "verificationStatus" NOT IN ('EXPIRED', 'REMOVED')
+        AND ${demo}
+        AND ${doc} @@ to_tsquery('french_unaccent'::regconfig, ${loose})
       ORDER BY rank DESC
       LIMIT ${limit}
     `);
@@ -59,16 +60,23 @@ export class PostgresSearchProvider implements FullTextSearchProvider {
     const q = query.trim();
     if (!q) return [];
     const like = `%${q}%`;
+    const demo = isDemoModeEnabled() ? Prisma.sql`TRUE` : Prisma.sql`"isDemo" = false`;
+    const doc = Prisma.sql`to_tsvector('french_unaccent'::regconfig, coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce("nafLabel", ''))`;
+    const tsq = buildTsQuery(q, { prefix: true, requireAll: true });
     return prisma.$queryRaw<SearchHit[]>(Prisma.sql`
       SELECT id,
-        (ts_rank(to_tsvector('french', coalesce(name, '') || ' ' || coalesce(description, '')), plainto_tsquery('french', ${q}))
-          + (CASE WHEN name ILIKE ${like} THEN 1 ELSE 0 END)
-          + similarity(name, ${q}))::float AS rank
+        (${tsq ? Prisma.sql`ts_rank(${doc}, to_tsquery('french_unaccent'::regconfig, ${tsq}))` : Prisma.sql`0`}
+          + (CASE WHEN unaccent(name) ILIKE unaccent(${like}) THEN 1 ELSE 0 END)
+          + similarity(coalesce("nameNormalized", name), unaccent(lower(${q}))))::float AS rank
       FROM company
-      WHERE to_tsvector('french', coalesce(name, '') || ' ' || coalesce(description, '')) @@ plainto_tsquery('french', ${q})
-        OR name ILIKE ${like}
-        OR similarity(name, ${q}) > 0.3
-        OR EXISTS (SELECT 1 FROM unnest(technologies) t WHERE t ILIKE ${like})
+      WHERE "isPlaceholder" = false
+        AND ${demo}
+        AND (
+          ${tsq ? Prisma.sql`${doc} @@ to_tsquery('french_unaccent'::regconfig, ${tsq})` : Prisma.sql`FALSE`}
+          OR unaccent(name) ILIKE unaccent(${like})
+          OR similarity(coalesce("nameNormalized", name), unaccent(lower(${q}))) > 0.3
+          OR EXISTS (SELECT 1 FROM unnest(technologies) t WHERE t ILIKE ${like})
+        )
       ORDER BY rank DESC
       LIMIT ${limit}
     `);

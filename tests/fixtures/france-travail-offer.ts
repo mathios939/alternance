@@ -1,0 +1,53 @@
+/** Offre France Travail représentative (structure de l'API Offres d'emploi v2). Données fictives. */
+export const FT_OFFER_FIXTURE = {
+  id: "195ABCD",
+  intitule: "Développeur web en alternance (H/F)",
+  description:
+    "Dans le cadre d'un contrat d'apprentissage de 24 mois, vous rejoignez notre équipe produit à Nantes pour concevoir des interfaces React et des API Node.js. Vous participez aux revues de code, aux tests automatisés et au déploiement continu. Rythme 3 jours entreprise / 2 jours école.",
+  dateCreation: "2026-09-01T08:15:00.000Z",
+  dateActualisation: "2026-09-05T10:00:00.000Z",
+  lieuTravail: { libelle: "44 - NANTES", latitude: 47.218371, longitude: -1.553621, codePostal: "44000", commune: "44109" },
+  romeCode: "M1805",
+  romeLibelle: "Études et développement informatique",
+  appellationlibelle: "Développeur / Développeuse web",
+  entreprise: { nom: "ATLANTIC SOFTWARE", description: "Éditeur de logiciels nantais.", url: "https://www.atlantic-software.example", entrepriseAdaptee: false },
+  typeContrat: "CDD",
+  typeContratLibelle: "Contrat à durée déterminée - 24 Mois",
+  natureContrat: "Contrat apprentissage",
+  experienceExige: "D",
+  experienceLibelle: "Débutant accepté",
+  formations: [{ codeFormation: "", domaineLibelle: "informatique", niveauLibelle: "Bac+2 ou équivalents", commentaire: "", exigence: "S" }],
+  competences: [
+    { code: "1", libelle: "React", exigence: "S" },
+    { code: "2", libelle: "Node.js", exigence: "S" },
+    { code: "3", libelle: "Concevoir une application web", exigence: "E" },
+  ],
+  qualitesProfessionnelles: [{ libelle: "Faire preuve de rigueur et de précision", description: "" }],
+  salaire: { libelle: "Mensuel de 759.00 Euros à 1766.00 Euros sur 12 mois" },
+  dureeTravailLibelle: "35H Travail en journée",
+  dureeTravailLibelleConverti: "Temps plein",
+  alternance: true,
+  contact: { nom: "ATLANTIC SOFTWARE - Mme DURAND Camille", coordonnees1: "", courriel: "recrutement@atlantic-software.example", urlPostulation: "https://www.atlantic-software.example/carrieres/dev-web" },
+  nombrePostes: 2,
+  accessibleTH: false,
+  codeNAF: "62.01Z",
+  secteurActivite: "62",
+  secteurActiviteLibelle: "Programmation informatique",
+  origineOffre: { origine: "1", urlOrigine: "https://candidat.francetravail.fr/offres/recherche/detail/195ABCD" },
+};
+
+export const FT_OFFER_ANONYMOUS = {
+  id: "196EFGH",
+  intitule: "Assistant(e) comptable en alternance",
+  description:
+    "Au sein d'un cabinet d'expertise comptable de Rennes, vous préparez un BTS Comptabilité en contrat de professionnalisation : saisie, lettrage, rapprochements bancaires et préparation des déclarations de TVA sous la supervision d'un collaborateur confirmé.",
+  dateCreation: "2026-09-03T09:00:00.000Z",
+  lieuTravail: { libelle: "35 - RENNES", codePostal: "35000", commune: "35238" },
+  natureContrat: "Contrat de professionnalisation",
+  typeContratLibelle: "Contrat à durée déterminée - 12 Mois",
+  alternance: true,
+  salaire: { libelle: "Selon profil et expérience" },
+  formations: [{ niveauLibelle: "Bac ou équivalent", exigence: "E" }],
+  contact: { nom: "CABINET FIDUCIAIRE OUEST", courriel: "candidatures@fiduciaire-ouest.example" },
+  origineOffre: { origine: "2", urlOrigine: "https://www.partenaire-emploi.example/offre/xyz", partenaires: [{ nom: "Partenaire Emploi", url: "https://www.partenaire-emploi.example/offre/xyz" }] },
+};

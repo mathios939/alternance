@@ -246,7 +246,11 @@ export const REMOTE_POLICIES: Record<RemotePolicy, { label: string; short: strin
   NONE: { label: "Sur site", short: "Sur site" },
   HYBRID: { label: "Hybride", short: "Hybride" },
   FULL: { label: "Télétravail complet", short: "Full remote" },
+  UNKNOWN: { label: "Télétravail non précisé", short: "Non précisé" },
 };
+
+/** Politiques de télétravail sélectionnables (préférence candidat, filtres) : jamais « inconnu ». */
+export const REMOTE_POLICY_CHOICES: RemotePolicy[] = ["NONE", "HYBRID", "FULL"];
 
 export const WORK_RHYTHMS: Record<WorkRhythm, { label: string; short: string }> = {
   TWO_THREE: { label: "2 jours école / 3 jours entreprise", short: "2j / 3j" },

@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { parseAsArrayOf, parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from "nuqs";
 import { RotateCcw, SlidersHorizontal } from "lucide-react";
 import { ContractType, EducationLevel, RemotePolicy } from "@/generated/prisma/enums";
-import { CONTRACT_TYPES, DURATIONS, EDUCATION_LEVELS, EDUCATION_LEVEL_KEYS, JOB_FAMILIES, JOB_FAMILY_KEYS, PUBLISHED_WITHIN_OPTIONS, RADIUS_OPTIONS, REMOTE_POLICIES, SECTORS, SECTOR_KEYS, type PublishedWithin } from "@/config/taxonomy";
+import { CONTRACT_TYPES, DURATIONS, EDUCATION_LEVELS, EDUCATION_LEVEL_KEYS, JOB_FAMILIES, JOB_FAMILY_KEYS, PUBLISHED_WITHIN_OPTIONS, RADIUS_OPTIONS, REMOTE_POLICIES, REMOTE_POLICY_CHOICES, SECTORS, SECTOR_KEYS, type PublishedWithin } from "@/config/taxonomy";
 import { REGIONS } from "@/config/cities";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,7 @@ export function SearchFiltersPanel({ hasProfile }: { hasProfile: boolean }) {
               ))}
             </div>
           </div>
-          <CheckList name="remote" options={(Object.keys(REMOTE_POLICIES) as RemotePolicy[]).map((k) => ({ value: k, label: REMOTE_POLICIES[k].label }))} value={filters.remote} onChange={(v) => patch({ remote: v.length ? v : null })} />
+          <CheckList name="remote" options={REMOTE_POLICY_CHOICES.map((k) => ({ value: k, label: REMOTE_POLICIES[k].label }))} value={filters.remote} onChange={(v) => patch({ remote: v.length ? v : null })} />
         </div>
       </Section>
       <Section title="Publication">

@@ -27,6 +27,7 @@ const SOURCE_LABEL: Record<ContactSource, string> = {
   PUBLIC_PROFILE: "Profil public",
   PRESS: "Presse",
   USER_PROVIDED: "Ajouté par un utilisateur",
+  JOB_POSTING: "Publié dans une offre officielle",
   DEMO: "Démonstration",
 };
 

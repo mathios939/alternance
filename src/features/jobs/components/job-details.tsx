@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Building2, Car, Clock, ExternalLink, GraduationCap, Gift, MapPin, School, Timer, Euro, Wifi, CalendarDays, Layers, Users, Info, Eye } from "lucide-react";
+import { Building2, Car, Clock, GraduationCap, Gift, MapPin, School, Timer, Euro, Wifi, CalendarDays, Layers, Users, Eye } from "lucide-react";
 import type { JobDetailData } from "@/features/jobs/types";
-import { formatPublishedAgo, formatSalary, formatDuration, formatDistanceKm, formatDate } from "@/lib/format";
+import { formatSalary, formatDuration, formatDistanceKm, formatDate } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { CONTRACT_TYPES, REMOTE_POLICIES, WORK_RHYTHMS, educationRangeLabel, SECTORS, type SectorKey, COMPANY_SIZES } from "@/config/taxonomy";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { DataBadge } from "@/components/shared/data-badge";
+import { JobProvenance } from "./job-provenance";
 import { CompanyLogo } from "./job-card";
 import { MatchScoreBreakdown } from "./match-score";
 import { JobActions } from "./job-actions";
@@ -38,18 +40,23 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
             <CompanyLogo name={job.company.name} logoUrl={job.company.logoUrl} size="lg" />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                {job.isDemo ? <DataBadge kind="DEMO" /> : job.dataOrigin === "REAL" ? <DataBadge kind="REAL" /> : null}
+                {job.isDemo ? <DataBadge kind="DEMO" /> : job.dataOrigin === "REAL" ? <DataBadge kind="REAL" /> : <DataBadge kind="UNKNOWN" />}
                 <Badge variant="muted">{CONTRACT_TYPES[job.contractType].label}</Badge>
+                {job.sourceCount > 1 ? <Badge variant="info">Trouvée sur {job.sourceCount} sources</Badge> : null}
               </div>
               <h1 id="job-title" className={isPage ? "mt-2 text-2xl font-semibold tracking-tight sm:text-3xl" : "mt-2 text-xl font-semibold tracking-tight"}>
                 {job.title}
               </h1>
               <p className="mt-1 text-muted-foreground">
-                <Link href={`/companies/${job.company.slug}`} className="font-medium text-foreground hover:underline">
-                  {job.company.name}
-                </Link>{" "}
+                {job.company.isPlaceholder ? (
+                  <span className="font-medium text-foreground">{job.company.name}</span>
+                ) : (
+                  <Link href={`/companies/${job.company.slug}`} className="font-medium text-foreground hover:underline">
+                    {job.company.name}
+                  </Link>
+                )}{" "}
                 · {job.city}
-                {job.department ? ` (${job.department})` : ""} · Publié {formatPublishedAgo(job.publishedAt)}
+                {job.department ? ` (${job.department})` : ""} · Publié <RelativeTime date={job.publishedAt} mode="published" />
               </p>
             </div>
           </div>
@@ -62,7 +69,7 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
           <Fact icon={Wifi} label="Télétravail" value={REMOTE_POLICIES[job.remote].label} />
           <Fact icon={Timer} label="Durée" value={job.durationMonths ? `${job.durationMonths} mois` : "Non précisée"} />
           <Fact icon={Layers} label="Rythme" value={job.rhythm ? WORK_RHYTHMS[job.rhythm].short : "Non précisé"} />
-          <Fact icon={Euro} label="Salaire" value={salary ?? "Grille légale"} />
+          <Fact icon={Euro} label="Salaire" value={salary ? `${salary}${job.salaryPeriod === "YEAR" ? " / an" : job.salaryPeriod === "HOUR" ? " / h" : ""}` : job.isDemo ? "Grille légale" : "Non précisé"} />
           {job.startDate ? <Fact icon={CalendarDays} label="Début" value={formatDate(job.startDate, "MMMM yyyy")} /> : null}
           <Fact icon={Building2} label="Secteur" value={sector ? `${sector.emoji} ${sector.label}` : job.sector} />
           <Fact icon={Eye} label="Vues" value={job.viewCount.toLocaleString("fr-FR")} />
@@ -165,18 +172,7 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
         ) : null}
 
         <Separator />
-        <section className="text-sm text-muted-foreground">
-          <p className="inline-flex items-center gap-1.5">
-            <Info className="size-3.5" aria-hidden /> Source : {job.sourceName}
-            {job.sourceUrl ? (
-              <a href={job.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                voir l'annonce d'origine <ExternalLink className="size-3" aria-hidden />
-              </a>
-            ) : null}
-          </p>
-          {job.otherSources.length > 0 ? <p className="mt-1">Également publiée sur : {job.otherSources.map((s) => s.name).join(", ")}.</p> : null}
-          {job.expiresAt ? <p className="mt-1">Expire le {formatDate(job.expiresAt)}.</p> : null}
-        </section>
+        <JobProvenance job={job} />
       </div>
 
       {isPage ? (
@@ -203,7 +199,7 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
               <div className="min-w-0">
                 <p className="truncate font-semibold">{job.company.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {COMPANY_SIZES[job.company.size].label}
+                  {job.companyDetail.sizeOrigin === "UNKNOWN" ? "Taille non renseignée" : COMPANY_SIZES[job.company.size].label}
                   {job.companyDetail.headcount ? ` · ${job.companyDetail.headcount.toLocaleString("fr-FR")} salariés` : ""}
                 </p>
               </div>
@@ -219,9 +215,13 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
                 <Users className="size-4 text-muted-foreground" aria-hidden /> {job.companyDetail.contactsCount} contact{job.companyDetail.contactsCount > 1 ? "s" : ""} référencé{job.companyDetail.contactsCount > 1 ? "s" : ""}
               </li>
             </ul>
-            <Link href={`/companies/${job.company.slug}`} className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
-              Voir l'entreprise et ses {job.companyDetail.activeJobsCount} offre{job.companyDetail.activeJobsCount > 1 ? "s" : ""} →
-            </Link>
+            {job.company.isPlaceholder ? (
+              <p className="mt-3 text-xs text-muted-foreground">L'employeur n'est pas communiqué par la source : candidate via le lien officiel de l'offre.</p>
+            ) : (
+              <Link href={`/companies/${job.company.slug}`} className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
+                Voir l'entreprise et ses {job.companyDetail.activeJobsCount} offre{job.companyDetail.activeJobsCount > 1 ? "s" : ""} →
+              </Link>
+            )}
           </div>
         </aside>
       ) : null}

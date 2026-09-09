@@ -8,7 +8,16 @@ import { CompanySize } from "@/generated/prisma/enums";
 import { boundingBox, haversineKm } from "@/lib/geo";
 import { calculateOpportunityScore, type CandidateForMatching, type CompanyForMatching, type OpportunityResult } from "@/lib/matching";
 import { getSearchProvider } from "@/lib/search";
+import { demoFilter } from "@/lib/demo-mode";
 import type { CompanyCardData } from "@/features/companies/types";
+import type { CompanySourceRef } from "@/services/ingestion/data-sources";
+
+/** Entreprises visibles : jamais la fiche technique « Employeur non communiqué », ni la démo si DEMO_MODE=false. */
+export function visibleCompaniesWhere(): Prisma.CompanyWhereInput {
+  return { isPlaceholder: false, ...demoFilter() };
+}
+
+const VISIBLE_JOBS: Prisma.JobWhereInput = { isActive: true, canonicalJobId: null, verificationStatus: { notIn: ["EXPIRED", "REMOVED"] } };
 
 const csv = <T extends string>(values: readonly T[]) =>
   z
@@ -33,8 +42,12 @@ export type CompanyFilters = z.infer<typeof companyFiltersSchema>;
 const PAGE_SIZE = 18;
 
 export const companyCardInclude = {
-  _count: { select: { jobs: { where: { isActive: true, canonicalJobId: null } }, contacts: { where: { optOutAt: null } } } },
+  _count: { select: { jobs: { where: VISIBLE_JOBS }, contacts: { where: { optOutAt: null } } } },
 } satisfies Prisma.CompanyInclude;
+
+export function toDataSources(value: unknown): CompanySourceRef[] {
+  return Array.isArray(value) ? (value as CompanySourceRef[]).filter((s) => s && typeof s.source === "string") : [];
+}
 
 type CompanyWithCounts = Prisma.CompanyGetPayload<{ include: typeof companyCardInclude }>;
 
@@ -51,6 +64,8 @@ export function toCompanyForMatching(c: CompanyWithCounts): CompanyForMatching {
     department: c.department,
     region: c.region,
     hiresApprentices: c.hiresApprentices,
+    historyKnown: c.isDemo || c.hiresApprentices || c._count.jobs > 0 || c.dataOrigin !== "REAL" || (Array.isArray(c.dataSources) && (c.dataSources as Array<{ source?: string }>).some((d) => d?.source === "france-travail" || d?.source === "company-career")),
+    sizeKnown: c.sizeOrigin !== "UNKNOWN",
     apprenticeCountEstimate: c.apprenticeCountEstimate,
     isHiring: c.isHiring,
     activeJobsCount: c._count.jobs,
@@ -97,6 +112,12 @@ export function toCompanyCard(c: CompanyWithCounts, ctx: Ctx, enrichment?: { fav
     contactsCount: c._count.contacts,
     isDemo: c.isDemo,
     dataOrigin: c.dataOrigin,
+    sizeOrigin: c.sizeOrigin,
+    isPlaceholder: c.isPlaceholder,
+    siren: c.siren,
+    employeeRangeLabel: c.employeeRangeLabel,
+    dataSources: toDataSources(c.dataSources),
+    lastVerifiedAt: c.lastVerifiedAt?.toISOString() ?? null,
     opportunity,
     distanceKm,
     isFavorite: enrichment?.favorites.has(c.id) ?? false,
@@ -105,7 +126,7 @@ export function toCompanyCard(c: CompanyWithCounts, ctx: Ctx, enrichment?: { fav
 }
 
 export async function searchCompanies(filters: CompanyFilters, ctx: Ctx = {}) {
-  const where: Prisma.CompanyWhereInput = {};
+  const where: Prisma.CompanyWhereInput = visibleCompaniesWhere();
   const and: Prisma.CompanyWhereInput[] = [];
   let center: { lat: number; lng: number; radius: number } | null = null;
   const city = filters.city ? findCity(filters.city) : undefined;
@@ -162,8 +183,8 @@ export const getCompanyBySlug = cache(async (slug: string) => {
     include: {
       ...companyCardInclude,
       locations: true,
-      contacts: { where: { optOutAt: null }, orderBy: { confidenceScore: "desc" } },
-      jobs: { where: { isActive: true, canonicalJobId: null }, orderBy: { publishedAt: "desc" }, include: { skills: { include: { skill: { select: { slug: true, name: true } } } }, company: { select: { id: true, slug: true, name: true, logoUrl: true, size: true, sector: true, city: true } } } },
+      contacts: { where: { optOutAt: null, ...demoFilter() }, orderBy: { confidenceScore: "desc" } },
+      jobs: { where: { ...VISIBLE_JOBS, ...demoFilter() }, orderBy: { publishedAt: "desc" }, include: { skills: { include: { skill: { select: { slug: true, name: true } } } }, company: { select: { id: true, slug: true, name: true, logoUrl: true, size: true, sector: true, city: true, isPlaceholder: true } }, _count: { select: { sourceEntries: { where: { status: { in: ["ACTIVE", "UNKNOWN"] } } } } } } },
     },
   });
 });
@@ -172,7 +193,7 @@ export type CompanyDetail = NonNullable<Awaited<ReturnType<typeof getCompanyBySl
 
 export async function getSimilarCompanies(company: { id: string; sector: string; region: string | null; jobFamilies: string[] }, ctx: Ctx, limit = 4): Promise<CompanyCardData[]> {
   const companies = await prisma.company.findMany({
-    where: { id: { not: company.id }, OR: [{ sector: company.sector }, { jobFamilies: { hasSome: company.jobFamilies } }] },
+    where: { ...visibleCompaniesWhere(), id: { not: company.id }, OR: [{ sector: company.sector }, { jobFamilies: { hasSome: company.jobFamilies } }] },
     include: companyCardInclude,
     take: 30,
   });
@@ -191,7 +212,7 @@ export async function getSimilarCompanies(company: { id: string; sector: string;
 export async function getRadar(ctx: { userId: string; candidate: CandidateForMatching }, options?: { limit?: number; radiusKm?: number; onlyWithoutJobs?: boolean; sectors?: string[]; sizes?: CompanySize[] }) {
   const c = ctx.candidate;
   const radius = options?.radiusKm ?? c.maxRadiusKm;
-  const where: Prisma.CompanyWhereInput = {};
+  const where: Prisma.CompanyWhereInput = visibleCompaniesWhere();
   const and: Prisma.CompanyWhereInput[] = [];
   if (c.latitude !== null && c.longitude !== null && c.mobility !== "NATIONAL") {
     const box = boundingBox({ lat: c.latitude, lng: c.longitude }, radius);
@@ -201,7 +222,7 @@ export async function getRadar(ctx: { userId: string; candidate: CandidateForMat
   }
   if (options?.sectors?.length) and.push({ sector: { in: options.sectors } });
   if (options?.sizes?.length) and.push({ size: { in: options.sizes } });
-  if (options?.onlyWithoutJobs) and.push({ jobs: { none: { isActive: true } } });
+  if (options?.onlyWithoutJobs) and.push({ jobs: { none: VISIBLE_JOBS } });
   if (and.length) where.AND = and;
   const companies = await prisma.company.findMany({ where, include: { ...companyCardInclude, locations: true }, take: 400 });
   const enrichment = await loadEnrichment(ctx.userId, companies.map((x) => x.id));
@@ -231,6 +252,6 @@ export async function getRadar(ctx: { userId: string; candidate: CandidateForMat
 }
 
 export const getFeaturedCompanies = cache(async (limit = 6): Promise<CompanyCardData[]> => {
-  const companies = await prisma.company.findMany({ where: { hiresApprentices: true }, include: companyCardInclude, orderBy: [{ apprenticeCountEstimate: "desc" }], take: limit });
+  const companies = await prisma.company.findMany({ where: { ...visibleCompaniesWhere(), hiresApprentices: true }, include: companyCardInclude, orderBy: [{ apprenticeCountEstimate: "desc" }], take: limit });
   return companies.map((c) => toCompanyCard(c, { candidate: null }));
 });

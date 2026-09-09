@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, Check, FileUp, Loader2, Sparkles, Upload } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
-import { CONTRACT_TYPES, DURATIONS, EDUCATION_LEVELS, EDUCATION_LEVEL_KEYS, JOB_FAMILIES, MOBILITIES, RADIUS_OPTIONS, REMOTE_POLICIES, SECTORS, SECTOR_KEYS, WORK_RHYTHMS, guessJobFamily, type JobFamilyKey } from "@/config/taxonomy";
+import { CONTRACT_TYPES, DURATIONS, EDUCATION_LEVELS, EDUCATION_LEVEL_KEYS, JOB_FAMILIES, MOBILITIES, RADIUS_OPTIONS, REMOTE_POLICIES, REMOTE_POLICY_CHOICES, SECTORS, SECTOR_KEYS, WORK_RHYTHMS, guessJobFamily, type JobFamilyKey } from "@/config/taxonomy";
 import { ContractType, EducationLevel, Mobility, RemotePolicy, WorkRhythm } from "@/generated/prisma/enums";
 import { DEFAULT_PROFILE_VALUES, profileSchema, type ProfileValues } from "@/lib/validation/profile";
 import { Button } from "@/components/ui/button";
@@ -272,7 +272,7 @@ export function OnboardingWizard({ initial, mode = "onboarding" }: Props) {
             </div>
             <div className="space-y-2">
               <Label>Télétravail souhaité</Label>
-              <ChipSelect aria-label="Télétravail" columns={3} size="sm" options={(Object.keys(REMOTE_POLICIES) as RemotePolicy[]).map((k) => ({ value: k, label: REMOTE_POLICIES[k].label }))} value={values.remotePreference} onChange={(v) => set("remotePreference", v as RemotePolicy | null)} />
+              <ChipSelect aria-label="Télétravail" columns={3} size="sm" options={REMOTE_POLICY_CHOICES.map((k) => ({ value: k, label: REMOTE_POLICIES[k].label }))} value={values.remotePreference} onChange={(v) => set("remotePreference", v as RemotePolicy | null)} />
             </div>
           </div>
         ) : null}

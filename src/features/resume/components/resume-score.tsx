@@ -2,7 +2,7 @@ import { CheckCircle2, AlertTriangle, Lightbulb } from "lucide-react";
 import type { ResumeAnalysis } from "@/features/resume/lib/analyze";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/shared/relative-time";
 
 function ScoreRing({ score }: { score: number }) {
   const size = 96;
@@ -32,7 +32,7 @@ export function ResumeScore({ analysis }: { analysis: ResumeAnalysis }) {
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium tracking-wide text-primary uppercase">CV Score</p>
           <p className="text-lg font-semibold">{analysis.score >= 80 ? "Solide, prêt à envoyer" : analysis.score >= 60 ? "Bon, quelques ajustements" : "À retravailler avant d'envoyer"}</p>
-          <p className="text-xs text-muted-foreground">Analyse par règles (lisibilité, structure, mots-clés, compétences, longueur, ATS), mise à jour {formatRelative(analysis.analyzedAt)}. {analysis.wordCount} mots.</p>
+          <p className="text-xs text-muted-foreground">Analyse par règles (lisibilité, structure, mots-clés, compétences, longueur, ATS), mise à jour <RelativeTime date={analysis.analyzedAt} />. {analysis.wordCount} mots.</p>
         </div>
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2">

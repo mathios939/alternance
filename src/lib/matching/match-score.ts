@@ -25,14 +25,17 @@ export const MATCH_WEIGHTS: MatchBreakdown = {
   mobility: 10,
 };
 
-function scoreEducation(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): number {
+/** Valeur renvoyée quand l'offre ne renseigne pas un critère : il est exclu de la moyenne pondérée. */
+const UNKNOWN = null;
+
+function scoreEducation(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): number | null {
   const cand = educationRank(c.educationLevel);
   const min = educationRank(j.educationLevelMin);
   const max = educationRank(j.educationLevelMax);
 
   if (min === null && max === null) {
-    reasons.push({ kind: "neutral", label: "Niveau d'études non précisé dans l'offre" });
-    return 90;
+    reasons.push({ kind: "neutral", label: "Niveau d'études non précisé dans l'offre", detail: "Ce critère n'est pas compté." });
+    return UNKNOWN;
   }
   if (cand === null) {
     reasons.push({ kind: "warning", label: "Renseigne ton niveau d'études", detail: "Il compte pour 25 % du score." });
@@ -108,7 +111,7 @@ function scoreSkills(c: CandidateForMatching, j: JobForMatching, reasons: ScoreR
   return { score: clamp(score, 0, 100), matched, missing };
 }
 
-function scoreLocation(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): { score: number; distanceKm: number | null } {
+function scoreLocation(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): { score: number | null; distanceKm: number | null } {
   if (j.remote === "FULL") {
     reasons.push({ kind: "positive", label: "Télétravail complet : la distance n'est pas un frein" });
     return { score: 100, distanceKm: null };
@@ -159,7 +162,15 @@ function scoreLocation(c: CandidateForMatching, j: JobForMatching, reasons: Scor
     reasons.push({ kind: "neutral", label: "Dans ta région" });
     return { score: c.mobility === "REGION" || c.mobility === "NATIONAL" ? 65 : 45, distanceKm: null };
   }
+  if (!j.city && !j.department && !j.region) {
+    reasons.push({ kind: "neutral", label: "Lieu non précisé dans l'offre", detail: "Ce critère n'est pas compté." });
+    return { score: UNKNOWN, distanceKm: null };
+  }
   if (c.mobility === "NATIONAL") return { score: 55, distanceKm: null };
+  if (!c.city && !c.department && !c.region && c.latitude === null) {
+    reasons.push({ kind: "warning", label: "Renseigne ta ville pour évaluer la distance" });
+    return { score: UNKNOWN, distanceKm: null };
+  }
   reasons.push({ kind: "warning", label: "Localisation éloignée de ta zone de recherche" });
   return { score: 20, distanceKm: null };
 }
@@ -178,9 +189,13 @@ function scoreExperience(c: CandidateForMatching, j: JobForMatching, reasons: Sc
   return base;
 }
 
-function scoreRhythm(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): number {
+function scoreRhythm(c: CandidateForMatching, j: JobForMatching, reasons: ScoreReason[]): number | null {
+  if (!j.rhythm && !j.durationMonths) {
+    reasons.push({ kind: "neutral", label: "Rythme et durée non précisés dans l'offre", detail: "Ce critère n'est pas compté." });
+    return UNKNOWN;
+  }
   let rhythm: number;
-  if (!j.rhythm) rhythm = 80;
+  if (!j.rhythm) rhythm = 85;
   else if (!c.rhythm) rhythm = 75;
   else if (c.rhythm === j.rhythm) {
     rhythm = 100;
@@ -200,7 +215,9 @@ function scoreRhythm(c: CandidateForMatching, j: JobForMatching, reasons: ScoreR
 
 function scoreMobility(c: CandidateForMatching, j: JobForMatching, distanceKm: number | null, reasons: ScoreReason[]): number {
   let score = 100;
-  if (c.remotePreference === "FULL" && j.remote === "NONE") {
+  if (j.remote === "UNKNOWN") {
+    if (c.remotePreference && c.remotePreference !== "NONE") reasons.push({ kind: "neutral", label: "Télétravail non précisé dans l'offre", detail: "À demander lors de l'entretien." });
+  } else if (c.remotePreference === "FULL" && j.remote === "NONE") {
     score -= 45;
     reasons.push({ kind: "warning", label: "Tu souhaites du télétravail, l'offre est 100 % sur site" });
   } else if (c.remotePreference === "HYBRID" && j.remote === "NONE") {
@@ -208,7 +225,7 @@ function scoreMobility(c: CandidateForMatching, j: JobForMatching, distanceKm: n
   } else if (j.remote === "HYBRID" && c.remotePreference !== "NONE") {
     reasons.push({ kind: "positive", label: "Hybride : télétravail possible" });
   }
-  if (distanceKm !== null && distanceKm > 15 && !c.hasVehicle && j.remote === "NONE") {
+  if (distanceKm !== null && distanceKm > 15 && !c.hasVehicle && (j.remote === "NONE" || j.remote === "UNKNOWN")) {
     score -= 20;
     reasons.push({ kind: "warning", label: "Sans véhicule, vérifie les transports en commun", detail: `${Math.round(distanceKm)} km sur site.` });
   }
@@ -239,20 +256,19 @@ export function calculateMatchScore(candidate: CandidateForMatching, job: JobFor
   const rhythm = scoreRhythm(candidate, job, reasons);
   const mobility = scoreMobility(candidate, job, location.distanceKm, reasons);
 
+  // Un critère non renseigné par l'offre est exclu : la moyenne est renormalisée sur les critères connus.
+  const raw: Record<keyof MatchBreakdown, number | null> = { education, skills: skills.score, location: location.score, experience, rhythm, mobility };
+  const unknownCriteria = (Object.keys(MATCH_WEIGHTS) as (keyof MatchBreakdown)[]).filter((k) => raw[k] === null);
+  const knownWeight = (Object.keys(MATCH_WEIGHTS) as (keyof MatchBreakdown)[]).reduce((sum, k) => sum + (raw[k] === null ? 0 : MATCH_WEIGHTS[k]), 0);
   const breakdown: MatchBreakdown = {
-    education,
+    education: education ?? 100,
     skills: skills.score,
-    location: location.score,
+    location: location.score ?? 100,
     experience,
-    rhythm,
+    rhythm: rhythm ?? 100,
     mobility,
   };
-  const total = Math.round(
-    (Object.keys(MATCH_WEIGHTS) as (keyof MatchBreakdown)[]).reduce(
-      (sum, key) => sum + (breakdown[key] * MATCH_WEIGHTS[key]) / 100,
-      0,
-    ),
-  );
+  const total = knownWeight === 0 ? 0 : Math.round((Object.keys(MATCH_WEIGHTS) as (keyof MatchBreakdown)[]).reduce((sum, key) => sum + (raw[key] === null ? 0 : (raw[key]! * MATCH_WEIGHTS[key]) / knownWeight), 0));
 
   // Ordonner : positifs d'abord, puis avertissements, puis neutres
   const order = { positive: 0, warning: 1, neutral: 2 };
@@ -267,5 +283,6 @@ export function calculateMatchScore(candidate: CandidateForMatching, job: JobFor
     missingSkills: skills.missing,
     distanceKm: location.distanceKm,
     level: matchLevel(total),
+    unknownCriteria,
   };
 }

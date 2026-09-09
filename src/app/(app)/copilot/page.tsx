@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth/session";
-import { isMockAI } from "@/lib/ai";
+import { AI_UNAVAILABLE_MESSAGE, isAIUnavailable, isMockAI } from "@/lib/ai";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Bot } from "lucide-react";
 import { getContextSummary, getConversation, getConversations, getDocument, getDocuments } from "@/features/copilot/server/queries";
 import { CopilotChat } from "@/features/copilot/components/copilot-chat";
 import { CopilotSidebar } from "@/features/copilot/components/copilot-sidebar";
@@ -32,10 +34,18 @@ export default async function CopilotPage(props: PageProps<"/copilot">) {
   ]);
   const kind = intent && (KINDS as string[]).includes(intent) ? (intent as DocumentKindKey) : null;
   const mock = isMockAI();
+  const unavailable = isAIUnavailable();
 
   return (
     <PageContainer wide className="h-[calc(100vh-4rem)] py-4 sm:py-4">
       <h1 className="sr-only">Copilote IA</h1>
+      {unavailable ? (
+        <Alert variant="warning" className="mb-4">
+          <Bot />
+          <AlertTitle>{AI_UNAVAILABLE_MESSAGE}</AlertTitle>
+          <AlertDescription>Aucun fournisseur IA n'est configuré sur ce déploiement (AI_PROVIDER, ANTHROPIC_API_KEY ou OPENAI_API_KEY). Le reste de l'application fonctionne normalement ; aucune réponse n'est simulée.</AlertDescription>
+        </Alert>
+      ) : null}
       <div className="grid h-full gap-4 lg:grid-cols-[260px_1fr]">
         <aside className="surface hidden overflow-y-auto p-4 lg:block scrollbar-thin">
           <CopilotSidebar conversations={conversations} documents={documents} activeId={convId} activeDocId={docId} />
