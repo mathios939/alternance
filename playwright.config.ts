@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env["E2E_BASE_URL"] ?? "http://127.0.0.1:3000";
+const baseURL = process.env["E2E_BASE_URL"] ?? "http://localhost:3000";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -13,6 +13,8 @@ export default defineConfig({
     baseURL,
     trace: "retain-on-failure",
     locale: "fr-FR",
+    // Permet d'utiliser un Chromium déjà installé (ex. CHROMIUM_PATH=/opt/pw-browsers/chromium)
+    launchOptions: process.env["CHROMIUM_PATH"] ? { executablePath: process.env["CHROMIUM_PATH"] } : undefined,
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
