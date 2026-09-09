@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { parseAsString, useQueryState } from "nuqs";
 import { toast } from "sonner";
@@ -55,10 +55,15 @@ function Column({ status, items, onOpen, activeStatus }: { status: ApplicationSt
 export function ApplicationKanban({ board }: { board: BoardData }) {
   const router = useRouter();
   const [columns, setColumns] = useState(board.columns);
+  const [prevBoard, setPrevBoard] = useState(board);
+  if (board !== prevBoard) {
+    // Nouvelles données serveur : on resynchronise l'état local (pattern « adjust state during render »)
+    setPrevBoard(board);
+    setColumns(board.columns);
+  }
   const [activeId, setActiveId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const [selected, setSelected] = useQueryState("application", parseAsString);
-  useEffect(() => setColumns(board.columns), [board.columns]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const all = useMemo(() => Object.values(columns).flat(), [columns]);

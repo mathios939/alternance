@@ -86,7 +86,10 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
         <CompanyLogo name={job.company.name} logoUrl={job.company.logoUrl} size={isLarge ? "lg" : "md"} />
         <div className="min-w-0 flex-1">
           <h3 className={cn("font-semibold leading-snug text-balance", isLarge ? "text-lg" : "text-[15px]", "line-clamp-2")}>{job.title}</h3>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">{job.company.name}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
+            <span className="truncate">{job.company.name}</span>
+            {job.isDemo ? <span className="shrink-0 rounded-md bg-warning-soft px-1.5 py-px text-[10px] font-medium text-warning-foreground dark:text-warning" title="Offre de démonstration (fictive)">Démo</span> : null}
+          </p>
         </div>
         {job.match ? <MatchScoreRing score={job.match.total} level={job.match.level} size={isLarge ? 64 : 48} /> : null}
       </div>
@@ -123,12 +126,6 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
           })}
           {job.skills.length > (isLarge ? 8 : 5) ? <Badge variant="outline" className="font-normal">+{job.skills.length - (isLarge ? 8 : 5)}</Badge> : null}
         </div>
-      ) : null}
-
-      {job.isDemo ? (
-        <span className="absolute top-3 right-3 rounded-md bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground dark:text-warning" title="Offre de démonstration (fictive)">
-          Démo
-        </span>
       ) : null}
 
       {!isCompact ? (

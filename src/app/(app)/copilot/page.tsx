@@ -35,6 +35,7 @@ export default async function CopilotPage(props: PageProps<"/copilot">) {
 
   return (
     <PageContainer wide className="h-[calc(100vh-4rem)] py-4 sm:py-4">
+      <h1 className="sr-only">Copilote IA</h1>
       <div className="grid h-full gap-4 lg:grid-cols-[260px_1fr]">
         <aside className="surface hidden overflow-y-auto p-4 lg:block scrollbar-thin">
           <CopilotSidebar conversations={conversations} documents={documents} activeId={convId} activeDocId={docId} />
@@ -45,7 +46,7 @@ export default async function CopilotPage(props: PageProps<"/copilot">) {
           ) : kind ? (
             <DocumentGenerator kind={kind} params={ctxParams} contextLabel={summary.label} />
           ) : (
-            <CopilotChat conversationId={conversation?.id ?? null} initialMessages={conversation?.messages ?? []} isMock={mock} contextLabel={summary.label} contextParams={{ jobSlug: ctxParams.jobSlug, companySlug: ctxParams.companySlug, applicationId: ctxParams.applicationId }} initialPrompt={str(params["q"])} />
+            <CopilotChat key={conversation?.id ?? "new"} conversationId={conversation?.id ?? null} initialMessages={conversation?.messages ?? []} isMock={mock} contextLabel={summary.label} contextParams={{ jobSlug: ctxParams.jobSlug, companySlug: ctxParams.companySlug, applicationId: ctxParams.applicationId }} initialPrompt={str(params["q"])} />
           )}
         </section>
       </div>

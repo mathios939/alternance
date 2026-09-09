@@ -23,11 +23,7 @@ export function CopilotChat({ conversationId, initialMessages, isMock, contextLa
   const [convId, setConvId] = useState(conversationId);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMessages(initialMessages);
-    setConvId(conversationId);
-  }, [initialMessages, conversationId]);
+  const seq = useRef(0);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -37,8 +33,9 @@ export function CopilotChat({ conversationId, initialMessages, isMock, contextLa
     const content = text.trim();
     if (!content || streaming) return;
     setInput("");
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "USER", content };
-    const assistantId = `a-${Date.now()}`;
+    seq.current += 1;
+    const userMsg: ChatMessage = { id: `u-${seq.current}`, role: "USER", content };
+    const assistantId = `a-${seq.current}`;
     setMessages((m) => [...m, userMsg, { id: assistantId, role: "ASSISTANT", content: "" }]);
     setStreaming(true);
     const ctrl = new AbortController();

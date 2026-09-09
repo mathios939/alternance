@@ -1,30 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Cookie } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const KEY = "aos.cookie-consent";
+const EVENT = "aos:cookie-consent";
+
+function subscribe(cb: () => void) {
+  window.addEventListener(EVENT, cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    window.removeEventListener(EVENT, cb);
+    window.removeEventListener("storage", cb);
+  };
+}
+function readConsent(): string {
+  try {
+    return localStorage.getItem(KEY) ?? "none";
+  } catch {
+    return "blocked";
+  }
+}
 
 /**
  * Bandeau cookies. L'application n'utilise que des cookies strictement nécessaires
  * (session, préférences de thème) : aucun traceur tiers. Le bandeau informe et mémorise le choix.
  */
 export function CookieBanner() {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    try {
-      if (!localStorage.getItem(KEY)) setVisible(true);
-    } catch {
-      setVisible(false);
-    }
-  }, []);
+  const consent = useSyncExternalStore(subscribe, readConsent, () => "server");
+  const visible = consent === "none";
   function accept(value: "essential" | "all") {
     try {
       localStorage.setItem(KEY, JSON.stringify({ value, at: new Date().toISOString() }));
     } catch {}
-    setVisible(false);
+    window.dispatchEvent(new Event(EVENT));
   }
   if (!visible) return null;
   return (

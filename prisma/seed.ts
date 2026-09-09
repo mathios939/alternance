@@ -12,7 +12,7 @@ import { CITIES, findCity } from "../src/config/cities";
 import { SKILL_CATALOG } from "../src/config/skills";
 import { analyzeResume } from "../src/features/resume/lib/analyze";
 import { parseResumeText } from "../src/features/resume/lib/parse";
-import { JOB_FAMILIES, type JobFamilyKey } from "../src/config/taxonomy";
+import { JOB_FAMILIES } from "../src/config/taxonomy";
 import { skillSlugs } from "../src/lib/skills";
 import { slugify } from "../src/lib/utils";
 import { SEED_COMPANIES } from "./seed-data/companies";

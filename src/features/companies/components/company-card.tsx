@@ -47,7 +47,10 @@ export function CompanyCard({ company, variant = "default", isAuthenticated = tr
         <div className="flex items-start gap-3">
           <CompanyLogo name={company.name} logoUrl={company.logoUrl} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate font-semibold">{company.name}</h3>
+            <h3 className="flex items-center gap-1.5 truncate font-semibold">
+              <span className="truncate">{company.name}</span>
+              {company.isDemo ? <span className="shrink-0 rounded-md bg-warning-soft px-1.5 py-px text-[10px] font-medium text-warning-foreground dark:text-warning" title="Entreprise de démonstration (fictive)">Démo</span> : null}
+            </h3>
             <p className="truncate text-xs text-muted-foreground">
               {sector ? `${sector.emoji} ${sector.label}` : company.sector} · {COMPANY_SIZES[company.size].label}
             </p>
@@ -85,7 +88,6 @@ export function CompanyCard({ company, variant = "default", isAuthenticated = tr
             ))}
           </div>
         ) : null}
-        {company.isDemo ? <span className="absolute top-0 right-0 rounded-md bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground dark:text-warning">Démo</span> : null}
         {!compact ? (
           <div className="mt-4 flex items-center gap-2 border-t pt-3">
             <Button asChild variant="outline" size="sm">

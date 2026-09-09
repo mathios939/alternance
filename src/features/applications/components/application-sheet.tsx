@@ -38,35 +38,35 @@ const EVENT_LABEL: Record<string, string> = {
 
 export function ApplicationSheet({ applicationId, onClose }: { applicationId: string | null; onClose: () => void }) {
   const router = useRouter();
-  const [data, setData] = useState<ApplicationDetailData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<{ key: string; data: ApplicationDetailData | null; error: string | null } | null>(null);
   const [notes, setNotes] = useState("");
   const [nextAction, setNextAction] = useState("");
   const [nextActionAt, setNextActionAt] = useState("");
   const [pending, startTransition] = useTransition();
   const [reload, setReload] = useState(0);
+  const key = applicationId ? `${applicationId}:${reload}` : "";
 
   useEffect(() => {
     if (!applicationId) return;
     const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
     fetch(`/api/applications/${applicationId}`, { signal: ctrl.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("Candidature introuvable.");
         return (await r.json()) as ApplicationDetailData;
       })
       .then((d) => {
-        setData(d);
+        setState({ key, data: d, error: null });
         setNotes(d.notes ?? "");
         setNextAction(d.nextAction ?? "");
         setNextActionAt(d.nextActionAt ? d.nextActionAt.slice(0, 10) : "");
       })
-      .catch((e: Error) => e.name !== "AbortError" && setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e: Error) => e.name !== "AbortError" && setState({ key, data: null, error: e.message }));
     return () => ctrl.abort();
-  }, [applicationId, reload]);
+  }, [applicationId, key]);
+
+  const data = state?.key === key ? state.data : null;
+  const error = state?.key === key ? state.error : null;
+  const loading = Boolean(applicationId) && !data && !error;
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, success?: string) {
     startTransition(async () => {

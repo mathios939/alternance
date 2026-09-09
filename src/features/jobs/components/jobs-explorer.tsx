@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { parseAsString, useQueryState } from "nuqs";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Loader2, Search, Sparkles } from "lucide-react";
 import type { JobCardData, JobDetailData, JobSearchResult } from "@/features/jobs/types";
@@ -19,55 +19,57 @@ import { SearchBar } from "./search-bar";
 
 type Props = { result: JobSearchResult; isAuthenticated: boolean; hasProfile: boolean; activeFilters: number; initialQuery: string; initialCity: string };
 
+type DetailState = { key: string; data: JobDetailData | null; error: string | null };
+
+/** Cache mémoire des fiches consultées (borné), partagé entre navigations. */
+const detailCache = new Map<string, JobDetailData>();
+function remember(slug: string, job: JobDetailData) {
+  if (detailCache.size >= 200) detailCache.delete(detailCache.keys().next().value as string);
+  detailCache.set(slug, job);
+}
+
 function useJobDetail(slug: string | null) {
-  const [data, setData] = useState<JobDetailData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<DetailState | null>(null);
   const [nonce, setNonce] = useState(0);
-  const cache = useRef(new Map<string, JobDetailData>());
+  const key = slug ? `${slug}:${nonce}` : "";
+  const cached = slug ? (detailCache.get(slug) ?? null) : null;
+
   useEffect(() => {
-    if (!slug) {
-      setData(null);
-      return;
-    }
-    const cached = cache.current.get(slug);
-    if (cached) {
-      setData(cached);
-      return;
-    }
+    if (!slug || detailCache.has(slug)) return;
     const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
     fetch(`/api/jobs/${slug}`, { signal: ctrl.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(r.status === 404 ? "Cette offre n'existe plus." : "Impossible de charger l'offre.");
         return (await r.json()) as JobDetailData;
       })
       .then((j) => {
-        cache.current.set(slug, j);
-        setData(j);
+        remember(slug, j);
+        setState({ key, data: j, error: null });
       })
       .catch((e: Error) => {
-        if (e.name !== "AbortError") setError(e.message);
-      })
-      .finally(() => setLoading(false));
+        if (e.name !== "AbortError") setState({ key, data: null, error: e.message });
+      });
     return () => ctrl.abort();
-  }, [slug, nonce]);
-  return { data, loading, error, retry: () => { cache.current.delete(slug ?? ""); setNonce((n) => n + 1); } };
+  }, [slug, key]);
+
+  const data = cached ?? (state?.key === key ? state.data : null);
+  const error = !cached && state?.key === key ? state.error : null;
+  const loading = Boolean(slug) && !data && !error;
+  return { data, loading, error, retry: () => { if (slug) detailCache.delete(slug); setNonce((n) => n + 1); } };
+}
+
+const desktopQuery = "(min-width: 1024px)";
+function subscribeDesktop(cb: () => void) {
+  const mq = window.matchMedia(desktopQuery);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
 }
 
 export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilters, initialQuery, initialCity }: Props) {
   const { filters, setFilters, pending } = useJobFilters();
   const [selectedSlug, setSelectedSlug] = useQueryState("job", parseAsString);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(true);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
+  const isDesktop = useSyncExternalStore(subscribeDesktop, () => window.matchMedia(desktopQuery).matches, () => true);
   const effectiveSlug = selectedSlug ?? (isDesktop ? (result.items[0]?.slug ?? null) : null);
   const detail = useJobDetail(effectiveSlug);
 

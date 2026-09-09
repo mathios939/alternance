@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Search, MapPin, ArrowRight, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,15 +15,11 @@ export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", cl
   const router = useRouter();
   const [q, setQ] = useState(initialQuery);
   const [city, setCity] = useState(initialCity);
-  const [suggestions, setSuggestions] = useState<City[]>([]);
+  const suggestions = useMemo<City[]>(() => searchCities(city), [city]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const cityRef = useRef<HTMLInputElement>(null);
   const listId = "city-suggestions";
-
-  useEffect(() => {
-    setSuggestions(searchCities(city));
-  }, [city]);
 
   function submit(e?: React.FormEvent) {
     e?.preventDefault();

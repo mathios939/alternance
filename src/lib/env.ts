@@ -25,7 +25,7 @@ const serverSchema = z.object({
   OPENAI_BASE_URL: z.string().optional(),
   TRAVEL_TIME_PROVIDER: z.enum(["none", "osrm", "mapbox"]).default("none"),
   OSRM_BASE_URL: z.string().default("https://router.project-osrm.org"),
-  NEXT_PUBLIC_MAPBOX_TOKEN: z.string().optional(),
+  NEXT_PUBLIC_MAP_STYLE_URL: z.string().optional(),
   FRANCE_TRAVAIL_CLIENT_ID: z.string().optional(),
   FRANCE_TRAVAIL_CLIENT_SECRET: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),

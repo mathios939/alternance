@@ -80,7 +80,7 @@ export function analyzeResume(text: string, options?: { targetJobFamilyKeywords?
   // 4. Compétences détectées
   const hard = parsed.skills.filter((s) => s.category !== "SOFT");
   const soft = parsed.skills.filter((s) => s.category === "SOFT");
-  let skillsScore = hard.length >= 8 ? 100 : hard.length >= 5 ? 85 : hard.length >= 3 ? 65 : hard.length >= 1 ? 40 : 15;
+  const skillsScore = hard.length >= 8 ? 100 : hard.length >= 5 ? 85 : hard.length >= 3 ? 65 : hard.length >= 1 ? 40 : 15;
   if (soft.length === 0) improvements.push("Mentionne 2 ou 3 qualités concrètes (rigueur, autonomie…) illustrées par des exemples.");
   if (hard.length >= 5) strengths.push(`${hard.length} compétences techniques ou métier identifiées.`);
   else if (hard.length < 3) {

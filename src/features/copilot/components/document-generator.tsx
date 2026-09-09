@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Copy, Sparkles, Wand2 } from "lucide-react";
@@ -26,7 +26,7 @@ export function DocumentGenerator({ kind, params, contextLabel, existing, autoSt
   const [instructions, setInstructions] = useState("");
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [started, setStarted] = useState(Boolean(existing));
+  const startedRef = useRef(Boolean(existing));
 
   function run() {
     startTransition(async () => {
@@ -41,8 +41,8 @@ export function DocumentGenerator({ kind, params, contextLabel, existing, autoSt
   }
 
   useEffect(() => {
-    if (autoStart && !started) {
-      setStarted(true);
+    if (autoStart && !startedRef.current) {
+      startedRef.current = true;
       run();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

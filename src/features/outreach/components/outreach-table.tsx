@@ -46,11 +46,9 @@ function NewOutreachDialog() {
   const [notes, setNotes] = useState("");
   const [pending, startTransition] = useTransition();
 
+  const searching = q.trim().length >= 2 && !company;
   useEffect(() => {
-    if (q.trim().length < 2 || company) {
-      setHits([]);
-      return;
-    }
+    if (!searching) return;
     const ctrl = new AbortController();
     const t = setTimeout(() => {
       fetch(`/api/companies/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
@@ -62,7 +60,8 @@ function NewOutreachDialog() {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [q, company]);
+  }, [q, searching]);
+  const visibleHits = searching ? hits : [];
 
   function submit() {
     if (!company) return;
@@ -101,9 +100,9 @@ function NewOutreachDialog() {
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input id="company-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une entreprise" className="pl-9" autoComplete="off" />
-                {hits.length > 0 ? (
+                {visibleHits.length > 0 ? (
                   <ul className="absolute top-full left-0 z-30 mt-1 w-full overflow-hidden rounded-xl border bg-popover p-1 shadow-lg" role="listbox">
-                    {hits.map((h) => (
+                    {visibleHits.map((h) => (
                       <li key={h.id} role="option" aria-selected={false} onMouseDown={() => { setCompany(h); setContactId("none"); }} className="cursor-pointer rounded-md px-3 py-2 text-sm hover:bg-accent">
                         {h.name} <span className="text-xs text-muted-foreground">· {h.city}</span>
                       </li>
@@ -166,7 +165,6 @@ function NewOutreachDialog() {
 export function OutreachTable({ rows }: { rows: OutreachRow[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const now = Date.now();
   function patch(id: string, input: Parameters<typeof updateOutreach>[1], msg?: string) {
     startTransition(async () => {
       const r = await updateOutreach(id, input);
@@ -196,7 +194,7 @@ export function OutreachTable({ rows }: { rows: OutreachRow[] }) {
             </TableHeader>
             <TableBody>
               {rows.map((r) => {
-                const overdue = r.nextFollowUpAt && new Date(r.nextFollowUpAt).getTime() < now && r.status !== "CLOSED" && r.status !== "REPLIED";
+                const overdue = r.isOverdue;
                 return (
                   <TableRow key={r.id} className={cn(overdue && "bg-warning-soft/30")}>
                     <TableCell>

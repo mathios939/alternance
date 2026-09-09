@@ -11,8 +11,10 @@ export async function getOutreaches(userId: string) {
     },
     orderBy: [{ nextFollowUpAt: "asc" }, { updatedAt: "desc" }],
   });
+  const now = Date.now();
   return rows.map((r) => ({
     id: r.id,
+    isOverdue: Boolean(r.nextFollowUpAt && r.nextFollowUpAt.getTime() < now && r.status !== "CLOSED" && r.status !== "REPLIED"),
     company: r.company,
     contact: r.contact ? { id: r.contact.id, name: `${r.contact.firstName} ${r.contact.lastName}`, jobTitle: r.contact.jobTitle } : null,
     channel: r.channel,

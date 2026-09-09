@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { MapPin } from "lucide-react";
 import { searchCities, type City } from "@/config/cities";
 import { Input } from "@/components/ui/input";
@@ -12,8 +12,7 @@ export function CityAutocomplete({ value, onChange, placeholder = "Ville", id, c
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  const [suggestions, setSuggestions] = useState<City[]>([]);
-  useEffect(() => setSuggestions(searchCities(value, 7)), [value]);
+  const suggestions = useMemo(() => searchCities(value, 7), [value]);
   return (
     <div className={cn("relative", className)}>
       <MapPin className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
