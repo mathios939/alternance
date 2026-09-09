@@ -21,7 +21,7 @@ export const RECHERCHE_ENTREPRISES_DEFAULTS = {
 export class CompanyApiError extends Error {
   constructor(
     message: string,
-    public readonly code: "BAD_REQUEST" | "RATE_LIMITED" | "SERVER" | "TIMEOUT" | "NETWORK" | "PARSE" | "NOT_FOUND",
+    public readonly code: "BAD_REQUEST" | "AUTH" | "RATE_LIMITED" | "SERVER" | "TIMEOUT" | "NETWORK" | "PARSE" | "NOT_FOUND",
     public readonly status?: number,
   ) {
     super(message);
@@ -189,6 +189,7 @@ export class RechercheEntreprisesProvider implements CompanyDataProvider {
       }
       throw new CompanyApiError(`Requête invalide : ${detail}`, "BAD_REQUEST", 400);
     }
+    if (res.status === 401 || res.status === 403) throw new CompanyApiError(`Accès refusé (${res.status}) : l'API a répondu mais a rejeté la requête (proxy, pare-feu ou politique d'accès)`, "AUTH", res.status);
     if (!res.ok) throw new CompanyApiError(`Réponse inattendue (${res.status})`, "SERVER", res.status);
     try {
       return JSON.parse(text) as T;

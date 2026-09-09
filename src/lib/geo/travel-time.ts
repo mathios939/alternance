@@ -44,7 +44,8 @@ export class OsrmTravelTimeProvider implements TravelTimeProvider {
     const profile = mode === "cycling" ? "bike" : "car";
     const url = `${this.baseUrl}/route/v1/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
     try {
-      const res = await fetch(url, { next: { revalidate: 60 * 60 * 24 } });
+      // Timeout court : un service d'itinéraires indisponible ne doit jamais bloquer une page.
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000), next: { revalidate: 60 * 60 * 24 } });
       if (!res.ok) return null;
       const data = (await res.json()) as { routes?: Array<{ duration: number; distance: number }> };
       const route = data.routes?.[0];

@@ -33,9 +33,11 @@ export class OpenAICompatibleProvider implements AIProvider {
         stream,
         messages: [{ role: "system", content: options.system }, ...options.messages],
       }),
-      signal: options.signal,
-    }).catch(() => {
-      throw new AIProviderError("Le service IA est injoignable.", "UNAVAILABLE", this.name);
+      // Timeout systématique (120 s) combiné au signal de l'appelant : jamais d'appel bloquant indéfiniment.
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
+    }).catch((error: unknown) => {
+      if ((error as Error | null)?.name === "AbortError") throw error;
+      throw new AIProviderError((error as Error | null)?.name === "TimeoutError" ? "Le service IA n'a pas répondu à temps." : "Le service IA est injoignable.", "UNAVAILABLE", this.name);
     });
     if (res.status === 401) throw new AIProviderError("Clé API invalide.", "UNAUTHENTICATED", this.name);
     if (res.status === 429) throw new AIProviderError("Limite de requêtes IA atteinte.", "RATE_LIMITED", this.name);

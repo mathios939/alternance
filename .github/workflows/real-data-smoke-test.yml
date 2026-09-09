@@ -1,0 +1,127 @@
+name: Real data smoke test
+
+# Déclenchement manuel uniquement. À utiliser une fois France Travail configuré.
+# Pipeline réel mais limité (≤ 50 offres) : France Travail → normalisation → dédoublonnage →
+# base PostgreSQL ÉPHÉMÈRE du runner → Match Score → rapport qualité.
+# Jamais la base de production : la base vit dans un conteneur de service détruit avec le runner.
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: "Mots-clés"
+        default: "développeur"
+        required: false
+      city:
+        description: "Ville"
+        default: "Nantes"
+        required: false
+      radius:
+        description: "Rayon en km"
+        default: "30"
+        required: false
+      limit:
+        description: "Nombre max d'offres (20 à 50)"
+        default: "30"
+        required: false
+
+concurrency:
+  group: real-data-smoke-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  real-data-smoke:
+    name: France Travail → pipeline → base éphémère → Match Score
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: alternance_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      EXTERNAL_RESULTS_DIR: .external-results
+      # Base jetable du runner (conteneur de service), détruite à la fin du job.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alternance_smoke
+      # Valeur jetable exigée par la validation d'environnement : aucune session n'est créée.
+      BETTER_AUTH_SECRET: ci-smoke-test-placeholder-not-a-secret
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      DEMO_MODE: "false"
+      NEXT_PUBLIC_DEMO_MODE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la présence des secrets France Travail (valeurs jamais affichées)
+        id: check
+        env:
+          FT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: |
+          if [ -z "$FT_ID" ] || [ -z "$FT_SECRET" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)"
+            echo "::warning title=Real data smoke test::SKIPPED — SECRET NOT CONFIGURED"
+            printf '## Real data smoke test — ⚪ NOT CONFIGURED\n\nSKIPPED — SECRET NOT CONFIGURED : ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET`, puis relance « External validation » avant ce workflow.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Créer le schéma dans la base éphémère (prisma migrate deploy)
+        if: steps.check.outputs.configured == 'true'
+        run: npx prisma migrate deploy
+
+      - name: Smoke test données réelles (≤ 50 offres, quelques requêtes)
+        if: steps.check.outputs.configured == 'true'
+        id: smoke
+        continue-on-error: true
+        env:
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          SMOKE_QUERY: ${{ inputs.query }}
+          SMOKE_CITY: ${{ inputs.city }}
+          SMOKE_RADIUS: ${{ inputs.radius }}
+          SMOKE_LIMIT: ${{ inputs.limit }}
+        run: npm run smoke:real-data -- --q "$SMOKE_QUERY" --city "$SMOKE_CITY" --radius "$SMOKE_RADIUS" --limit "$SMOKE_LIMIT"
+
+      - name: Rapport
+        id: report
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.check.outputs.configured }}
+        run: |
+          if [ "$CONFIGURED" = "true" ]; then
+            npx tsx tests/external/report.ts real-data-smoke
+          else
+            echo "status=NOT_CONFIGURED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Statut du job (la base éphémère est détruite avec le runner)
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "Real data smoke test : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac

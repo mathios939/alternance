@@ -200,9 +200,10 @@ npm run test:ai-provider           # fournisseur IA réel : requête, streaming,
 npm run test:osrm                  # temps de trajet routé (instance OSRM)
 npm run test:companies             # API Recherche d'entreprises (SIRENE)
 npm run test:external              # enchaîne les quatre
+npm run smoke:real-data            # France Travail → pipeline → base LOCALE jetable → Match Score → rapport qualité
 ```
 
-Codes de retour des scripts externes : `0` succès, `1` échec, `2` configuration manquante (la variable manquante est nommée).
+Codes de retour des scripts externes : `0` succès, `2` configuration manquante (la variable manquante est nommée), `1` échec avec catégorie explicite (`NETWORK_ERROR`, `AUTH_ERROR`, `RATE_LIMIT`, `INVALID_RESPONSE`, `FAILED`). Les mêmes validations s'exécutent depuis GitHub Actions (workflows manuels « External validation » et « Real data smoke test ») : voir [`docs/GITHUB_ACTIONS.md`](docs/GITHUB_ACTIONS.md) pour les secrets à créer et l'ordre de lancement.
 
 ## Architecture
 
@@ -219,7 +220,8 @@ src/
   config/         taxonomie (secteurs, métiers, niveaux…), villes, compétences, navigation, plans
   generated/      client Prisma (non versionné)
 prisma/           schéma, migrations, seed
-tests/            unitaires (Vitest)      e2e/   Playwright
+tests/unit        unitaires (Vitest)      tests/integration  base locale + clients simulés
+tests/e2e         Playwright              tests/external     services réels (GitHub Actions ou local, docs/GITHUB_ACTIONS.md)
 docs/             ARCHITECTURE, DATA-MODEL, SCORING, PROVIDERS, DEPLOYMENT
 ```
 

@@ -1,0 +1,328 @@
+name: External validation
+
+# Déclenchement manuel uniquement : ces jobs contactent des services externes (France Travail,
+# API Recherche d'entreprises, OSRM, fournisseur IA). Aucun secret n'est affiché ; un secret absent
+# produit « SKIPPED — SECRET NOT CONFIGURED », jamais un succès simulé ni un MockProvider.
+on:
+  workflow_dispatch:
+    inputs:
+      france_travail_query:
+        description: "Mots-clés France Travail"
+        default: "développeur"
+        required: false
+      france_travail_city:
+        description: "Ville (résolue en code INSEE)"
+        default: "Nantes"
+        required: false
+      france_travail_limit:
+        description: "Nombre max d'offres (≤ 50)"
+        default: "20"
+        required: false
+
+concurrency:
+  group: external-validation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  EXTERNAL_RESULTS_DIR: .external-results
+  # Valeurs jetables exigées par la validation d'environnement de l'application : aucune base
+  # n'est contactée dans ce workflow et aucune session n'est signée avec ce secret.
+  DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
+  BETTER_AUTH_SECRET: ci-external-validation-placeholder-not-a-secret
+
+jobs:
+  france-travail-validation:
+    name: France Travail
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      status: ${{ steps.report.outputs.status }}
+      latency_ms: ${{ steps.report.outputs.latency_ms }}
+      count: ${{ steps.report.outputs.count }}
+      provider: ${{ steps.report.outputs.provider }}
+      tested_at: ${{ steps.report.outputs.tested_at }}
+      message: ${{ steps.report.outputs.message }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la présence des secrets (valeurs jamais affichées)
+        id: check
+        env:
+          FT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: |
+          if [ -z "$FT_ID" ] || [ -z "$FT_SECRET" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)"
+            echo "::warning title=France Travail::SKIPPED — SECRET NOT CONFIGURED"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Secrets présents."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Test externe France Travail
+        if: steps.check.outputs.configured == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          FT_QUERY: ${{ inputs.france_travail_query }}
+          FT_CITY: ${{ inputs.france_travail_city }}
+          FT_LIMIT: ${{ inputs.france_travail_limit }}
+        run: npm run test:france-travail -- --q "$FT_QUERY" --city "$FT_CITY" --radius 30 --limit "$FT_LIMIT"
+
+      - name: Rapport
+        id: report
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.check.outputs.configured }}
+        run: |
+          if [ "$CONFIGURED" = "true" ]; then
+            npx tsx tests/external/report.ts france-travail
+          else
+            printf 'status=NOT_CONFIGURED\nlatency_ms=\ncount=\nprovider=france-travail\ntested_at=%s\nmessage=SKIPPED — SECRET NOT CONFIGURED\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+            printf '### France Travail — ⚪ NOT CONFIGURED\n\nSKIPPED — SECRET NOT CONFIGURED : ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` (Settings → Secrets and variables → Actions).\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Statut du job
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "France Travail : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
+
+  company-api-validation:
+    name: API Recherche d'entreprises
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      status: ${{ steps.report.outputs.status }}
+      latency_ms: ${{ steps.report.outputs.latency_ms }}
+      count: ${{ steps.report.outputs.count }}
+      provider: ${{ steps.report.outputs.provider }}
+      tested_at: ${{ steps.report.outputs.tested_at }}
+      message: ${{ steps.report.outputs.message }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Installer les dépendances
+        run: npm ci
+      - name: Test externe API Recherche d'entreprises (2 requêtes, 5 fiches max)
+        id: test
+        continue-on-error: true
+        env:
+          COMPANY_DATA_PROVIDER: ${{ vars.COMPANY_DATA_PROVIDER }}
+        run: npm run test:companies -- --department 44
+      - name: Rapport
+        id: report
+        if: always()
+        run: npx tsx tests/external/report.ts companies
+      - name: Statut du job
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "API Recherche d'entreprises : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
+
+  osrm-validation:
+    name: OSRM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      status: ${{ steps.report.outputs.status }}
+      latency_ms: ${{ steps.report.outputs.latency_ms }}
+      count: ${{ steps.report.outputs.count }}
+      provider: ${{ steps.report.outputs.provider }}
+      tested_at: ${{ steps.report.outputs.tested_at }}
+      message: ${{ steps.report.outputs.message }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la configuration OSRM_BASE_URL (variable ou secret)
+        id: check
+        env:
+          OSRM_BASE_URL: ${{ vars.OSRM_BASE_URL || secrets.OSRM_BASE_URL }}
+        run: |
+          if [ -z "$OSRM_BASE_URL" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (OSRM_BASE_URL)"
+            echo "::warning title=OSRM::SKIPPED — SECRET NOT CONFIGURED (OSRM_BASE_URL)"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "OSRM_BASE_URL présente."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+      - name: Test externe OSRM (un trajet)
+        if: steps.check.outputs.configured == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          OSRM_BASE_URL: ${{ vars.OSRM_BASE_URL || secrets.OSRM_BASE_URL }}
+          TRAVEL_TIME_PROVIDER: osrm
+        run: npm run test:osrm
+      - name: Rapport
+        id: report
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.check.outputs.configured }}
+        run: |
+          if [ "$CONFIGURED" = "true" ]; then
+            npx tsx tests/external/report.ts osrm
+          else
+            printf 'status=NOT_CONFIGURED\nlatency_ms=\ncount=\nprovider=osrm\ntested_at=%s\nmessage=SKIPPED — SECRET NOT CONFIGURED\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+            printf '### OSRM — ⚪ NOT CONFIGURED\n\nSKIPPED — SECRET NOT CONFIGURED : définis la variable `OSRM_BASE_URL` (Settings → Secrets and variables → Actions → Variables).\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Statut du job
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "OSRM : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
+
+  ai-provider-validation:
+    name: Fournisseur IA
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      status: ${{ steps.report.outputs.status }}
+      latency_ms: ${{ steps.report.outputs.latency_ms }}
+      count: ${{ steps.report.outputs.count }}
+      provider: ${{ steps.report.outputs.provider }}
+      model: ${{ steps.report.outputs.model }}
+      tested_at: ${{ steps.report.outputs.tested_at }}
+      message: ${{ steps.report.outputs.message }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Déterminer le fournisseur et vérifier la clé (valeurs jamais affichées)
+        id: check
+        env:
+          AI_PROVIDER_VAR: ${{ vars.AI_PROVIDER }}
+          HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: |
+          PROVIDER="$AI_PROVIDER_VAR"
+          if [ -z "$PROVIDER" ]; then
+            if [ "$HAS_ANTHROPIC" = "true" ]; then PROVIDER=anthropic; elif [ "$HAS_OPENAI" = "true" ]; then PROVIDER=openai; fi
+          fi
+          echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
+          if [ "$PROVIDER" = "anthropic" ] && [ "$HAS_ANTHROPIC" = "true" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"; echo "Fournisseur : anthropic (clé présente)."
+          elif [ "$PROVIDER" = "openai" ] && [ "$HAS_OPENAI" = "true" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"; echo "Fournisseur : openai (clé présente)."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (ANTHROPIC_API_KEY ou OPENAI_API_KEY, et AI_PROVIDER)"
+            echo "::warning title=Fournisseur IA::SKIPPED — SECRET NOT CONFIGURED"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+      - name: Test externe fournisseur IA (deux requêtes de ~20 jetons)
+        if: steps.check.outputs.configured == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          AI_PROVIDER: ${{ steps.check.outputs.provider }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+        run: npm run test:ai-provider
+      - name: Rapport
+        id: report
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.check.outputs.configured }}
+        run: |
+          if [ "$CONFIGURED" = "true" ]; then
+            npx tsx tests/external/report.ts ai-provider
+          else
+            printf 'status=NOT_CONFIGURED\nlatency_ms=\ncount=\nprovider=\nmodel=\ntested_at=%s\nmessage=SKIPPED — SECRET NOT CONFIGURED\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+            printf '### Fournisseur IA — ⚪ NOT CONFIGURED\n\nSKIPPED — SECRET NOT CONFIGURED : ajoute `ANTHROPIC_API_KEY` (ou `OPENAI_API_KEY`) et la variable `AI_PROVIDER`.\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Statut du job
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "Fournisseur IA : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
+
+  summary:
+    name: Résumé External Validation
+    runs-on: ubuntu-latest
+    needs: [france-travail-validation, company-api-validation, osrm-validation, ai-provider-validation]
+    if: always()
+    steps:
+      - name: Écrire le résumé
+        env:
+          FT_STATUS: ${{ needs.france-travail-validation.outputs.status }}
+          FT_LAT: ${{ needs.france-travail-validation.outputs.latency_ms }}
+          FT_COUNT: ${{ needs.france-travail-validation.outputs.count }}
+          FT_MSG: ${{ needs.france-travail-validation.outputs.message }}
+          CO_STATUS: ${{ needs.company-api-validation.outputs.status }}
+          CO_LAT: ${{ needs.company-api-validation.outputs.latency_ms }}
+          CO_COUNT: ${{ needs.company-api-validation.outputs.count }}
+          CO_MSG: ${{ needs.company-api-validation.outputs.message }}
+          OS_STATUS: ${{ needs.osrm-validation.outputs.status }}
+          OS_LAT: ${{ needs.osrm-validation.outputs.latency_ms }}
+          OS_MSG: ${{ needs.osrm-validation.outputs.message }}
+          AI_STATUS: ${{ needs.ai-provider-validation.outputs.status }}
+          AI_LAT: ${{ needs.ai-provider-validation.outputs.latency_ms }}
+          AI_PROVIDER: ${{ needs.ai-provider-validation.outputs.provider }}
+          AI_MODEL: ${{ needs.ai-provider-validation.outputs.model }}
+          AI_MSG: ${{ needs.ai-provider-validation.outputs.message }}
+        run: |
+          label() { case "$1" in SUCCESS) echo "✅ PASS" ;; NOT_CONFIGURED) echo "⚪ NOT CONFIGURED" ;; ""|NOT_RUN) echo "⚪ NOT RUN" ;; *) echo "❌ FAIL ($1)" ;; esac; }
+          {
+            echo "## External Validation"
+            echo ""
+            echo "_Testé le $(date -u +'%Y-%m-%d %H:%M UTC') · run #${GITHUB_RUN_NUMBER}_"
+            echo ""
+            echo "| Service | Résultat | Latence | Résultats | Fournisseur | Note |"
+            echo "|---|---|---|---|---|---|"
+            echo "| France Travail | $(label "$FT_STATUS") | ${FT_LAT:-—} ms | ${FT_COUNT:-—} offres | france-travail | ${FT_MSG:-—} |"
+            echo "| Company API | $(label "$CO_STATUS") | ${CO_LAT:-—} ms | ${CO_COUNT:-—} fiches | recherche-entreprises | ${CO_MSG:-—} |"
+            echo "| OSRM | $(label "$OS_STATUS") | ${OS_LAT:-—} ms | — | osrm | ${OS_MSG:-—} |"
+            echo "| AI Provider | $(label "$AI_STATUS") | ${AI_LAT:-—} ms | — | ${AI_PROVIDER:-—} ${AI_MODEL:+(}${AI_MODEL}${AI_MODEL:+)} | ${AI_MSG:-—} |"
+            echo ""
+            echo "PASS = vérifié en conditions réelles · NOT CONFIGURED = secret ou variable absent (rien n'est simulé) · FAIL = catégorie d'erreur entre parenthèses (NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, INVALID_RESPONSE, FAILED)."
+          } >> "$GITHUB_STEP_SUMMARY"
