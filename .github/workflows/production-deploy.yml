@@ -78,8 +78,13 @@ jobs:
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
           pick() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const j=JSON.parse(d);const list=(j.domains||[]).map(x=>x.name);console.log(list.find(n=>n.endsWith(".vercel.app"))||list[0]||"")}catch{console.log("")}})'; }
           # Compte personnel (orgId = identifiant utilisateur) ou équipe : on tente sans puis avec teamId.
-          DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains" | pick)
-          if [ -z "$DOMAIN" ]; then DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains?teamId=$ORG_ID" | pick); fi
+          api() { curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" -H "content-type: application/json" "$@"; }
+          # Un projet créé en CLI n'a pas de preset : sans « nextjs », le build est servi comme un site statique (404 partout).
+          FW=$(api -X PATCH "https://api.vercel.com/v9/projects/$PROJECT_ID" -d '{"framework":"nextjs"}' | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).framework||"")}catch{console.log("")}})')
+          if [ "$FW" != "nextjs" ]; then FW=$(api -X PATCH "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$ORG_ID" -d '{"framework":"nextjs"}' | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).framework||"")}catch{console.log("")}})'); fi
+          echo "Preset du projet : ${FW:-non modifié (vercel.json fait foi)}"
+          DOMAIN=$(api "https://api.vercel.com/v9/projects/$PROJECT_ID/domains" | pick)
+          if [ -z "$DOMAIN" ]; then DOMAIN=$(api "https://api.vercel.com/v9/projects/$PROJECT_ID/domains?teamId=$ORG_ID" | pick); fi
           if [ -z "$DOMAIN" ]; then DOMAIN="$PROJECT.vercel.app"; fi
           echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
           echo "Domaine de production : https://$DOMAIN"
