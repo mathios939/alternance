@@ -1,5 +1,24 @@
-import type { ContractType, EducationLevel, RemotePolicy, WorkRhythm, ApplicationStatus, CompanySize, DataOrigin, JobVerificationStatus, SalaryPeriod } from "@/generated/prisma/enums";
+import type {
+  ContractType,
+  EducationLevel,
+  RemotePolicy,
+  WorkRhythm,
+  ApplicationStatus,
+  CompanySize,
+  DataOrigin,
+  JobVerificationStatus,
+  SalaryPeriod,
+} from "@/generated/prisma/enums";
 import type { MatchResult } from "@/lib/matching";
+import type { FreshnessLevel } from "@/lib/freshness";
+
+/** Dernière actualisation véridique applicable à une recherche (jamais « temps réel »). */
+export type SearchFreshnessInfo = {
+  lastSyncAt: string | null;
+  scope: "search" | "department" | "national" | "none";
+  label: string | null;
+  refreshing: boolean;
+};
 
 /** Données nécessaires à l'affichage d'une JobCard (sérialisables → utilisables côté client). */
 export type JobCardData = {
@@ -10,6 +29,12 @@ export type JobCardData = {
   department: string | null;
   region: string | null;
   publishedAt: string;
+  /** Première fois vue par Alternance OS ; « Nouveau » si découverte récemment. */
+  discoveredAt: string;
+  /** Dernière actualisation déclarée par la source, si connue. */
+  sourceUpdatedAt: string | null;
+  freshness: FreshnessLevel;
+  isNew: boolean;
   contractType: ContractType;
   educationLevelMin: EducationLevel | null;
   educationLevelMax: EducationLevel | null;
@@ -28,7 +53,15 @@ export type JobCardData = {
   lastVerifiedAt: string | null;
   sourceLabel: string;
   sourceCount: number;
-  company: { id: string; slug: string; name: string; logoUrl: string | null; size: CompanySize; sector: string; isPlaceholder: boolean };
+  company: {
+    id: string;
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    size: CompanySize;
+    sector: string;
+    isPlaceholder: boolean;
+  };
   /** Lien de candidature officiel (site carrières, source) : utilisable sans compte. */
   applicationUrl: string | null;
   match: MatchResult | null;
@@ -47,6 +80,7 @@ export type JobSearchResult = {
   pageSize: number;
   totalPages: number;
   interpretation?: string[];
+  freshness?: SearchFreshnessInfo;
 };
 
 /** Détail complet d'une offre (panneau latéral et page dédiée). */
@@ -66,7 +100,15 @@ export type JobDetailData = JobCardData & {
   applicationLabel: string | null;
   sourceName: string;
   /** Toutes les sources qui publient cette offre (Phase 6), la principale d'abord. */
-  sources: Array<{ key: string; name: string; url: string | null; applicationUrl: string | null; isPrimary: boolean; status: JobVerificationStatus; lastVerifiedAt: string | null }>;
+  sources: Array<{
+    key: string;
+    name: string;
+    url: string | null;
+    applicationUrl: string | null;
+    isPrimary: boolean;
+    status: JobVerificationStatus;
+    lastVerifiedAt: string | null;
+  }>;
   otherSources: Array<{ name: string; url: string | null }>;
   dataQualityScore: number | null;
   viewCount: number;
@@ -82,5 +124,8 @@ export type JobDetailData = JobCardData & {
     contactsCount: number;
     activeJobsCount: number;
   };
-  travel: { home: { minutes: number; distanceKm: number; quality: "estimated" | "routed" } | null; school: { minutes: number; distanceKm: number; quality: "estimated" | "routed" } | null };
+  travel: {
+    home: { minutes: number; distanceKm: number; quality: "estimated" | "routed" } | null;
+    school: { minutes: number; distanceKm: number; quality: "estimated" | "routed" } | null;
+  };
 };

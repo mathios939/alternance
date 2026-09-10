@@ -1,0 +1,123 @@
+name: Production backfill (national)
+
+# Rattrapage RÉEL et CONTRÔLÉ du catalogue France Travail, territoire par territoire :
+# Pays de la Loire → Bretagne → France entière (ou une liste de départements), fenêtre de publication
+# au choix. Reprenable : un run interrompu (budget de temps) conserve son curseur et le suivant reprend
+# au même département. Idempotent, borné par le quota partagé, observable (résumé + /admin/data).
+# Partage le groupe de concurrence de la synchronisation planifiée : jamais deux exécutions en parallèle.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Périmètre"
+        type: choice
+        options: [pdl, bretagne, ouest, france]
+        default: pdl
+      departments:
+        description: "Ou liste de départements (codes séparés par des virgules ; prioritaire sur le périmètre)"
+        default: ""
+        required: false
+      window:
+        description: "Fenêtre de publication"
+        type: choice
+        options: [31d, 7d, 3d, 1d]
+        default: 31d
+      max_minutes:
+        description: "Budget de temps (minutes, ≤ 330)"
+        default: "330"
+        required: false
+      force:
+        description: "Resynchroniser même les territoires à jour (< 20 h)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: production-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    name: Rattrapage ${{ inputs.departments || inputs.scope }} (${{ inputs.window }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      DEMO_MODE: "false"
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
+      BETTER_AUTH_SECRET: ci-sync-placeholder-not-a-secret
+      FRANCE_TRAVAIL_MAX_RPS: ${{ vars.FRANCE_TRAVAIL_MAX_RPS || '3' }}
+    steps:
+      - name: Vérifier la présence des secrets (valeurs jamais affichées)
+        id: check
+        env:
+          DB: ${{ secrets.DATABASE_URL }}
+          FT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: |
+          if [ -z "$DB" ] || [ -z "$FT_ID" ] || [ -z "$FT_SECRET" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (DATABASE_URL / FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)"
+            printf '## Production backfill — ⚪ NOT CONFIGURED\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Migrations (prisma migrate deploy uniquement, connexion directe)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          POOLED_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          export DATABASE_URL="${POOLED_URL/-pooler./.}"
+          for i in 1 2 3; do
+            if npx prisma migrate deploy; then exit 0; fi
+            echo "Tentative $i échouée, nouvelle tentative dans 15 s…"; sleep 15
+          done
+          exit 1
+
+      - name: Rattrapage national reprenable
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          SCOPE: ${{ inputs.scope }}
+          DEPTS: ${{ inputs.departments }}
+          WINDOW: ${{ inputs.window }}
+          MAX_MINUTES: ${{ inputs.max_minutes }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          printf '## Production backfill (%s)\n\nPérimètre : `%s` · fenêtre `%s` · budget %s min\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DEPTS:-$SCOPE}" "$WINDOW" "$MAX_MINUTES" >> "$GITHUB_STEP_SUMMARY"
+          MAX=$(( MAX_MINUTES > 330 ? 330 : MAX_MINUTES ))
+          args=(--window "$WINDOW" --max-minutes "$MAX" --trigger backfill)
+          if [ -n "$DEPTS" ]; then args+=(--departments "$DEPTS"); else args+=(--scope "$SCOPE"); fi
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          npm run jobs:sync:national -- "${args[@]}" | tee backfill.log
+          grep -E "^\s*(OK|!!|KO)|Rattrapage|requêtes sur" backfill.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 120 >> "$GITHUB_STEP_SUMMARY" || true
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Couverture réelle
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          printf '\n### Couverture réelle\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:coverage | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"

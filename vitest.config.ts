@@ -16,7 +16,14 @@ export default defineConfig({
     environment: "node",
     projects: [
       { extends: true, test: { name: "unit", include: ["tests/unit/**/*.test.ts"] } },
-      { extends: true, test: { name: "integration", include: ["tests/integration/**/*.test.ts"], testTimeout: 60_000 } },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          include: ["tests/integration/**/*.test.ts"],
+          testTimeout: 60_000,
+        },
+      },
     ],
     coverage: {
       reporter: ["text", "html"],

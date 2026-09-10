@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { isDemoModeEnabled } from "@/lib/demo-mode";
+import { normalizeText } from "@/lib/text/normalize";
 import { buildTsQuery } from "./synonyms";
 import type { FullTextSearchProvider, SearchHit } from "./types";
 
@@ -9,7 +10,7 @@ import type { FullTextSearchProvider, SearchHit } from "./types";
  * Recherche PostgreSQL insensible aux accents (configuration `french_unaccent`, cf. migration) :
  *   1. requête stricte (tous les mots, chaque mot étendu à ses synonymes) ;
  *   2. requête élargie (au moins un mot) si rien n'est trouvé.
- * Le titre et les compétences sont aussi testés en ILIKE (tolérance aux libellés exotiques).
+ * Le titre normalisé est aussi testé en ILIKE (tolérance aux libellés exotiques, index trigramme).
  * Les offres expirées / retirées et, hors mode démo, les offres de démonstration sont exclues.
  */
 export class PostgresSearchProvider implements FullTextSearchProvider {
@@ -19,38 +20,36 @@ export class PostgresSearchProvider implements FullTextSearchProvider {
     const limit = options?.limit ?? 400;
     const q = query.trim();
     if (!q) return [];
-    const like = `%${q}%`;
+    const like = `%${normalizeText(q)}%`;
     const demo = isDemoModeEnabled() ? Prisma.sql`TRUE` : Prisma.sql`"isDemo" = false`;
     const strict = buildTsQuery(q, { prefix: true, requireAll: true });
     if (!strict) return [];
-    const doc = Prisma.sql`to_tsvector('french_unaccent'::regconfig, coalesce(title, '') || ' ' || coalesce(description, ''))`;
+    // Vecteur STOCKÉ (colonne générée « searchVector » : titre + description + compétences, index GIN)
+    // et titre normalisé (index trigramme) : les deux branches du OR sont indexées, le classement lit
+    // le vecteur sans le recalculer. Mesuré sur 40 000 offres : voir docs/SYNC.md.
     const first = await prisma.$queryRaw<SearchHit[]>(Prisma.sql`
       SELECT id,
-        (ts_rank(${doc}, to_tsquery('french_unaccent'::regconfig, ${strict}))
-          + (CASE WHEN unaccent(title) ILIKE unaccent(${like}) THEN 0.5 ELSE 0 END))::float AS rank
+        (ts_rank("searchVector", to_tsquery('french_unaccent'::regconfig, ${strict}))
+          + (CASE WHEN "normalizedTitle" ILIKE ${like} THEN 0.5 ELSE 0 END))::float AS rank
       FROM job
       WHERE "isActive" = true
         AND "verificationStatus" NOT IN ('EXPIRED', 'REMOVED')
         AND ${demo}
-        AND (
-          ${doc} @@ to_tsquery('french_unaccent'::regconfig, ${strict})
-          OR unaccent(title) ILIKE unaccent(${like})
-          OR EXISTS (SELECT 1 FROM unnest("skillsText") s WHERE unaccent(s) ILIKE unaccent(${like}))
-        )
-      ORDER BY rank DESC
+        AND ("searchVector" @@ to_tsquery('french_unaccent'::regconfig, ${strict}) OR "normalizedTitle" ILIKE ${like})
+      ORDER BY rank DESC, "publishedAt" DESC
       LIMIT ${limit}
     `);
     if (first.length > 0) return first;
     const loose = buildTsQuery(q, { prefix: true, requireAll: false });
     if (!loose || loose === strict) return [];
     return prisma.$queryRaw<SearchHit[]>(Prisma.sql`
-      SELECT id, ts_rank(${doc}, to_tsquery('french_unaccent'::regconfig, ${loose}))::float AS rank
+      SELECT id, ts_rank("searchVector", to_tsquery('french_unaccent'::regconfig, ${loose}))::float AS rank
       FROM job
       WHERE "isActive" = true
         AND "verificationStatus" NOT IN ('EXPIRED', 'REMOVED')
         AND ${demo}
-        AND ${doc} @@ to_tsquery('french_unaccent'::regconfig, ${loose})
-      ORDER BY rank DESC
+        AND "searchVector" @@ to_tsquery('french_unaccent'::regconfig, ${loose})
+      ORDER BY rank DESC, "publishedAt" DESC
       LIMIT ${limit}
     `);
   }

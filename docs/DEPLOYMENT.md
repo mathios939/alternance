@@ -6,7 +6,7 @@ Tout part des **secrets du dépôt** (GitHub repository → Settings → Secrets
 
 | Secret | Rôle |
 |---|---|
-| `DATABASE_URL` | PostgreSQL **persistante** (Neon, Supabase, Railway…, URL « pooled » recommandée). Seul `prisma migrate deploy` est exécuté : jamais de reset ni de `db push`. |
+| `DATABASE_URL` | PostgreSQL **persistante** (Neon, Supabase, Railway…, URL « pooled » recommandée pour l'application). Seul `prisma migrate deploy` est exécuté : jamais de reset ni de `db push`. Les migrations passent par l'hôte **direct** (le workflow retire `-pooler.` de l'hôte Neon : le verrou consultatif de Prisma Migrate ne traverse pas un pooler en mode transaction), avec trois tentatives. |
 | `VERCEL_TOKEN` | Jeton Vercel (Account → Settings → Tokens). Le workflow crée ou relie le projet, pousse les variables, déploie et vérifie l'URL. |
 | `FRANCE_TRAVAIL_CLIENT_ID` / `FRANCE_TRAVAIL_CLIENT_SECRET` | Source réelle des offres (déjà validés par « External validation »). |
 | `BETTER_AUTH_SECRET`, `CRON_SECRET` | Optionnels : s'ils manquent, le déploiement génère une valeur aléatoire **persistée dans Vercel** et la conserve ensuite. |
@@ -14,11 +14,15 @@ Tout part des **secrets du dépôt** (GitHub repository → Settings → Secrets
 Workflows (onglet Actions, déclenchement manuel) :
 
 1. **Production audit** : présence des secrets et variables.
-2. **Production database** : `prisma migrate deploy`, puis ingestion réelle contrôlée (par défaut Loire-Atlantique, 31 jours, 300 offres max), entreprises SIRENE du département, vérification, état de la base (`npm run db:report`).
-3. **Production deploy (Vercel)** : projet, variables (`DEMO_MODE=false`, `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`…), migrations, build, déploiement, vérification des pages publiques et de `/api/health`.
-4. **Production sync** (planifié trois fois par jour, aussi manuel) : `jobs:sync` (départements de la variable `SYNC_DEPARTMENTS`, `44` par défaut, 7 jours), `jobs:verify`, `jobs:expire`. Idempotent, borné, résumé dans chaque run, jamais deux exécutions simultanées. Il remplace les crons Vercel (non disponibles en sous-quotidien sur le plan Hobby).
+2. **Production database** : `prisma migrate deploy`, puis ingestion réelle contrôlée d'un département (par défaut Loire-Atlantique, 31 jours, 300 offres max), entreprises SIRENE du département, vérification, état de la base (`npm run db:report`).
+3. **Production deploy (Vercel)** : projet (preset `nextjs` imposé par `vercel.json` et par l'API, fonctions en région `fra1` comme la base), variables (`DEMO_MODE=false`, `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`…), migrations, **build exécuté chez Vercel** (les variables de type Secret ne peuvent pas être tirées localement), déploiement, détection de l'alias public réel, vérification des pages publiques et de `/api/health`.
+4. **Production backfill (national)** (manuel) : rattrapage réel et reprenable du catalogue France Travail par territoire — périmètre `pdl` → `bretagne` → `ouest` → `france` ou liste de départements, fenêtre 31 j / 7 j / 3 j / 1 j, budget de temps ≤ 330 min. Un run interrompu reprend au même département au run suivant. Voir `docs/SYNC.md`.
+5. **Production sync** (planifié **toutes les deux heures**, aussi manuel) : synchronisation nationale incrémentale à quatre priorités (nouveautés France entière 1 j → zones très demandées 7 j → recherches populaires → rattrapage progressif 31 j de N départements), puis `jobs:verify` (offres absentes des listages d'abord), `jobs:expire`, `db:coverage`. Idempotent, borné par le quota partagé, résumé dans chaque run, jamais deux exécutions simultanées (groupe partagé avec le backfill). Il remplace les crons Vercel.
+6. **Production smoke test** (manuel, entrée : URL publique) : parcours visiteur Playwright desktop + mobile contre la production.
 
-Endpoint de santé : `GET /api/health` → `app`, `database`, `demoMode`, `services.franceTravail`, `services.companyData`, `services.ai`, `services.travelTime`, compteurs d'offres réelles et dernière synchronisation. Aucune valeur secrète.
+Variables de dépôt facultatives : `NEXT_PUBLIC_APP_URL`, `ADMIN_EMAILS`, `FRANCE_TRAVAIL_MAX_RPS` (débit soutenu vers France Travail, défaut 3/s, plafond 8/s sous la limite officielle de 10/s).
+
+Endpoint de santé : `GET /api/health` → `app`, `database`, `demoMode`, `services.franceTravail`, `services.companyData`, `services.ai`, `services.travelTime`, compteurs d'offres réelles, dernière synchronisation et `coverage` (actives, < 24 h, < 7 j, découvertes < 24 h, départements synchronisés / total, par région). Aucune valeur secrète.
 
 ## Vercel + PostgreSQL managé (manuel)
 
@@ -51,10 +55,13 @@ Base PostgreSQL 14+ avec l'extension `pg_trgm` disponible (créée par la migrat
 Deux façons équivalentes d'exécuter les tâches (mêmes fonctions, jamais couplées à Vercel) :
 
 ```bash
-npm run jobs:sync          # ingestion France Travail (départements prioritaires)
-npm run jobs:verify        # re-vérification des offres auprès de la source
+npm run jobs:sync:national -- --scope france --window 31d   # rattrapage national reprenable (docs/SYNC.md)
+npm run jobs:sync:national -- --mode incremental            # synchronisation continue à quatre priorités
+npm run jobs:sync          # ingestion ciblée (une ville, un département, une requête)
+npm run jobs:verify        # re-vérification des offres auprès de la source (absentes des listages d'abord)
 npm run jobs:expire        # expiration selon les règles explicites
 npm run companies:import   # import ciblé d'entreprises (SIRENE)
+npm run db:coverage        # couverture réelle (TOTAL_OFFERS, ACTIVE_ALTERNANCE, LAST_24H, BY_REGION…)
 ```
 
 ou en HTTP, avec `CRON_SECRET` défini : `GET /api/cron/sync|verify|expire|companies` avec `Authorization: Bearer $CRON_SECRET` (pour un ordonnanceur externe ; la planification par défaut est le workflow GitHub Actions « Production sync »). PostgreSQL doit disposer des extensions `unaccent` et `pg_trgm` (disponibles sur Neon, Supabase, RDS, Railway).

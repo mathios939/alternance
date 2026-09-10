@@ -92,7 +92,22 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/alternance_smoke npm 
 
 Les appels réseau ne peuvent donc jamais rendre `npm test` instable.
 
-## 5. Ce que ces workflows ne font pas encore
+## 5. Production : base, déploiement, synchronisation nationale
 
-- Aucune écriture dans une base de production : la synchronisation planifiée en production sera mise en place dans une phase ultérieure, après validation.
-- Aucun déclenchement automatique sur push ou pull request.
+Workflows de production (secrets `DATABASE_URL`, `VERCEL_TOKEN`, `FRANCE_TRAVAIL_*` ; voir `docs/DEPLOYMENT.md` et `docs/SYNC.md`) :
+
+| Workflow | Déclenchement | Rôle |
+|---|---|---|
+| **Production audit** | manuel | présence des secrets et variables (jamais les valeurs) |
+| **Production database** | manuel | `prisma migrate deploy` (connexion directe, 3 tentatives), ingestion contrôlée d'un département, entreprises SIRENE, vérification, `db:report` |
+| **Production deploy (Vercel)** | manuel | projet (preset `nextjs`, région `fra1`), variables, migrations, build chez Vercel, déploiement, vérification de l'URL publique et de `/api/health` |
+| **Production backfill (national)** | manuel (`scope` : `pdl`, `bretagne`, `ouest`, `france` ou `departments`, `window`, `max_minutes`, `force`) | rattrapage réel et **reprenable** du catalogue France Travail, territoire par territoire ; couverture réelle en résumé |
+| **Production sync** | **toutes les deux heures** (`23 */2 * * *`) et manuel | synchronisation nationale incrémentale (nouveautés France entière → zones demandées → recherches populaires → rattrapage progressif), `jobs:verify`, `jobs:expire`, `db:coverage` |
+| **Production smoke test** | manuel (`url`) | parcours visiteur Playwright desktop + mobile contre la production |
+
+Variables facultatives : `FRANCE_TRAVAIL_MAX_RPS` (débit soutenu, défaut 3/s, plafond 8/s), `NEXT_PUBLIC_APP_URL`, `ADMIN_EMAILS`. Les workflows planifiés ne s'exécutent que depuis la branche par défaut du dépôt.
+
+## 6. Ce que ces workflows ne font pas
+
+- Aucun déclenchement automatique sur push ou pull request (la production se déploie manuellement, la synchronisation est planifiée).
+- Aucune base de production contactée par les validations externes ni par le smoke test de données réelles (bases éphémères uniquement).

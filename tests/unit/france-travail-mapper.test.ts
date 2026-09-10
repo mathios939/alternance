@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cleanCityLabel, ftOfferSchema, mapFtOffer, parseContractDuration, parseEducationLevel, parseSalary } from "@/services/job-sources/providers/france-travail";
+import {
+  cleanCityLabel,
+  ftOfferSchema,
+  mapFtOffer,
+  parseContractDuration,
+  parseEducationLevel,
+  parseSalary,
+} from "@/services/job-sources/providers/france-travail";
 import { normalizeJob } from "@/services/job-sources/normalize";
 import { validateRawJob } from "@/services/ingestion/validate";
 import { FT_OFFER_ANONYMOUS, FT_OFFER_FIXTURE } from "../fixtures/france-travail-offer";
@@ -80,11 +87,23 @@ describe("France Travail — normalisation", () => {
 
 describe("France Travail — parseurs", () => {
   it("analyse les libellés de salaire sans inventer", () => {
-    expect(parseSalary("Mensuel de 759.00 Euros à 1766.00 Euros sur 12 mois")).toEqual({ min: 759, max: 1766, period: "MONTH" });
-    expect(parseSalary("Annuel de 21 000,00 Euros")).toEqual({ min: 21000, max: 21000, period: "YEAR" });
+    expect(parseSalary("Mensuel de 759.00 Euros à 1766.00 Euros sur 12 mois")).toEqual({
+      min: 759,
+      max: 1766,
+      period: "MONTH",
+    });
+    expect(parseSalary("Annuel de 21 000,00 Euros")).toEqual({
+      min: 21000,
+      max: 21000,
+      period: "YEAR",
+    });
     expect(parseSalary("Horaire de 11.88 Euros")).toEqual({ min: 12, max: 12, period: "HOUR" });
     expect(parseSalary("Selon profil")).toEqual({ min: null, max: null, period: null });
-    expect(parseSalary("Mensuel de 43% à 100% du SMIC")).toEqual({ min: null, max: null, period: "MONTH" });
+    expect(parseSalary("Mensuel de 43% à 100% du SMIC")).toEqual({
+      min: null,
+      max: null,
+      period: "MONTH",
+    });
     expect(parseSalary(null)).toEqual({ min: null, max: null, period: null });
   });
 
@@ -104,5 +123,41 @@ describe("France Travail — parseurs", () => {
     expect(cleanCityLabel("85 - LA ROCHE SUR YON")).toBe("La Roche-sur-Yon");
     expect(cleanCityLabel("29 - PLOUGASTEL DAOULAS")).toBe("Plougastel Daoulas");
     expect(cleanCityLabel(null)).toBeNull();
+  });
+});
+
+describe("France Travail — lieu au niveau région", () => {
+  it("ne lit jamais un code région comme un code département", () => {
+    // « 44 - Grand Est » : 44 est ici le code RÉGION Grand Est, pas la Loire-Atlantique.
+    const raw = mapFtOffer(
+      ftOfferSchema.parse({
+        ...FT_OFFER_FIXTURE,
+        id: "REG1",
+        lieuTravail: { libelle: "44 - Grand Est" },
+      }),
+    );
+    expect(raw.department).toBeNull();
+    expect(raw.region).toBe("Grand Est");
+    expect(raw.city).toBe("Grand Est");
+    expect(raw.postalCode).toBeNull();
+    const pdl = mapFtOffer(
+      ftOfferSchema.parse({
+        ...FT_OFFER_FIXTURE,
+        id: "REG2",
+        lieuTravail: { libelle: "52 - Pays de la Loire" },
+      }),
+    );
+    expect(pdl.department).toBeNull();
+    expect(pdl.region).toBe("Pays de la Loire");
+    // Avec un code postal ou une commune, le préfixe reste un département.
+    const nantes = mapFtOffer(
+      ftOfferSchema.parse({
+        ...FT_OFFER_FIXTURE,
+        id: "REG3",
+        lieuTravail: { libelle: "44 - NANTES", codePostal: "44000", commune: "44109" },
+      }),
+    );
+    expect(nantes.department).toBe("Loire-Atlantique");
+    expect(nantes.region).toBe("Pays de la Loire");
   });
 });

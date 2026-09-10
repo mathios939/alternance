@@ -1,6 +1,18 @@
 import { createLogger } from "@/lib/logger";
-import type { FetchPage, FetchParams, JobSourceProvider, ProviderCapabilities, ProviderStatus, VerificationResult } from "../../types";
-import { FranceTravailApiError, FranceTravailClient, type FtClientConfig, type FtSearchParams } from "./client";
+import type {
+  FetchPage,
+  FetchParams,
+  JobSourceProvider,
+  ProviderCapabilities,
+  ProviderStatus,
+  VerificationResult,
+} from "../../types";
+import {
+  FranceTravailApiError,
+  FranceTravailClient,
+  type FtClientConfig,
+  type FtSearchParams,
+} from "./client";
 import { CommuneResolver } from "./communes";
 import { ftOfferSchema, mapFtOffer } from "./mapper";
 
@@ -66,7 +78,9 @@ export class FranceTravailProvider implements JobSourceProvider {
       type: this.type,
       configured: missing.length === 0,
       missing,
-      reason: missing.length ? `Variables manquantes : ${missing.join(", ")} (compte partenaire sur https://francetravail.io)` : undefined,
+      reason: missing.length
+        ? `Variables manquantes : ${missing.join(", ")} (compte partenaire sur https://francetravail.io)`
+        : undefined,
     };
   }
 
@@ -74,8 +88,16 @@ export class FranceTravailProvider implements JobSourceProvider {
   client(): FranceTravailClient {
     if (this.clientInstance) return this.clientInstance;
     const missing = this.missingEnv();
-    if (missing.length) throw new FranceTravailApiError(`Provider France Travail non configuré : ${missing.join(", ")}`, "AUTH");
-    this.clientInstance = new FranceTravailClient({ clientId: this.config.clientId!, clientSecret: this.config.clientSecret!, ...this.config.client });
+    if (missing.length)
+      throw new FranceTravailApiError(
+        `Provider France Travail non configuré : ${missing.join(", ")}`,
+        "AUTH",
+      );
+    this.clientInstance = new FranceTravailClient({
+      clientId: this.config.clientId!,
+      clientSecret: this.config.clientSecret!,
+      ...this.config.client,
+    });
     this.resolver = new CommuneResolver(this.clientInstance);
     return this.clientInstance;
   }
@@ -99,14 +121,18 @@ export class FranceTravailProvider implements JobSourceProvider {
             .filter((r) => r.code && /apprentissage|professionnalisation/i.test(r.libelle ?? ""))
             .map((r) => r.code!);
           if (codes.length === 0) {
-            log.warn("Référentiel naturesContrats sans code alternance identifiable, repli sur E2,FS");
+            log.warn(
+              "Référentiel naturesContrats sans code alternance identifiable, repli sur E2,FS",
+            );
             return DEFAULT_ALTERNANCE_NATURE_CODES;
           }
           log.info("Codes alternance confirmés par le référentiel", { codes });
           return codes;
         })
         .catch((error) => {
-          log.warn("Référentiel naturesContrats indisponible, repli sur E2,FS", { error: String(error) });
+          log.warn("Référentiel naturesContrats indisponible, repli sur E2,FS", {
+            error: String(error),
+          });
           this.natureCodes = null;
           return DEFAULT_ALTERNANCE_NATURE_CODES;
         });
@@ -114,10 +140,23 @@ export class FranceTravailProvider implements JobSourceProvider {
     return this.natureCodes;
   }
 
+  async contractNatures(): Promise<string[]> {
+    return this.alternanceNatureCodes();
+  }
+
   /** Construit les paramètres de recherche à partir des paramètres génériques. */
-  async buildSearchParams(params: FetchParams): Promise<{ search: Omit<FtSearchParams, "range">; warnings: string[] }> {
+  async buildSearchParams(
+    params: FetchParams,
+  ): Promise<{ search: Omit<FtSearchParams, "range">; warnings: string[] }> {
     const warnings: string[] = [];
-    const search: Omit<FtSearchParams, "range"> = { natureContrat: (await this.alternanceNatureCodes()).join(","), sort: 1 };
+    const natures = params.contractNatures?.length
+      ? params.contractNatures
+      : await this.alternanceNatureCodes();
+    const search: Omit<FtSearchParams, "range"> = {
+      natureContrat: natures.join(","),
+      sort: 1,
+      priority: params.priority ?? "backfill",
+    };
     if (params.keywords?.trim()) search.motsCles = params.keywords.trim().slice(0, 200);
     const cityInput = params.inseeCode ?? params.city;
     if (cityInput) {
@@ -126,13 +165,18 @@ export class FranceTravailProvider implements JobSourceProvider {
         search.commune = commune.inseeCode;
         search.distance = Math.max(0, Math.min(params.radiusKm ?? 10, 200));
       } else {
-        warnings.push(`Commune « ${cityInput} » introuvable dans le référentiel France Travail : recherche sans rayon.`);
+        warnings.push(
+          `Commune « ${cityInput} » introuvable dans le référentiel France Travail : recherche sans rayon.`,
+        );
       }
     }
     if (!search.commune && params.department) search.departement = params.department;
     if (!search.commune && !search.departement && params.region) search.region = params.region;
-    if (params.since) search.minCreationDate = params.since;
-    else if (params.publishedWithinDays) {
+    if (params.since) {
+      // L'API exige les deux bornes ensemble : fenêtre explicite [since, until].
+      search.minCreationDate = params.since;
+      search.maxCreationDate = params.until ?? new Date();
+    } else if (params.publishedWithinDays) {
       const allowed = [1, 3, 7, 14, 31] as const;
       search.publieeDepuis = allowed.find((d) => d >= params.publishedWithinDays!) ?? 31;
     }
@@ -141,11 +185,15 @@ export class FranceTravailProvider implements JobSourceProvider {
 
   async fetchJobs(params: FetchParams): Promise<FetchPage> {
     const status = await this.status();
-    if (!status.configured) throw new FranceTravailApiError(status.reason ?? "Provider non configuré", "AUTH");
+    if (!status.configured)
+      throw new FranceTravailApiError(status.reason ?? "Provider non configuré", "AUTH");
     const client = this.client();
     const { search, warnings } = await this.buildSearchParams(params);
     const started = Date.now();
-    const result = await client.searchAll(search, { maxResults: Math.min(params.limit ?? this.config.maxResults ?? 1150, 3150) });
+    const result = await client.searchAll(search, {
+      maxResults: Math.min(params.limit ?? this.config.maxResults ?? 1150, 3150),
+      stopIfTruncated: params.stopIfTruncated,
+    });
     warnings.push(...result.warnings);
     const jobs = [];
     let invalid = 0;
@@ -158,8 +206,23 @@ export class FranceTravailProvider implements JobSourceProvider {
       jobs.push(mapFtOffer(parsed.data));
     }
     if (invalid) warnings.push(`${invalid} offre(s) au format inattendu ignorée(s).`);
-    log.info("Recherche terminée", { provider: this.key, operation: "search", durationMs: Date.now() - started, status: "ok", count: jobs.length, total: result.total, requests: result.requests });
-    return { jobs, total: result.total, requests: result.requests, warnings };
+    log.info("Recherche terminée", {
+      provider: this.key,
+      operation: "search",
+      durationMs: Date.now() - started,
+      status: "ok",
+      count: jobs.length,
+      total: result.total,
+      requests: result.requests,
+      truncated: result.truncated,
+    });
+    return {
+      jobs,
+      total: result.total,
+      requests: result.requests,
+      warnings,
+      truncated: result.truncated,
+    };
   }
 
   /** Vérifie l'existence d'offres via l'endpoint de détail (retrait = 404 / 204). */
@@ -168,15 +231,23 @@ export class FranceTravailProvider implements JobSourceProvider {
     const results: VerificationResult[] = [];
     for (const externalId of externalIds) {
       try {
-        const detail = await client.getOffer(externalId);
+        const detail = await client.getOffer(externalId, "verify");
         if (detail === null) {
           results.push({ externalId, status: "REMOVED", job: null });
           continue;
         }
         const parsed = ftOfferSchema.safeParse(detail);
-        results.push(parsed.success ? { externalId, status: "ACTIVE", job: mapFtOffer(parsed.data) } : { externalId, status: "UNKNOWN", error: "Format inattendu" });
+        results.push(
+          parsed.success
+            ? { externalId, status: "ACTIVE", job: mapFtOffer(parsed.data) }
+            : { externalId, status: "UNKNOWN", error: "Format inattendu" },
+        );
       } catch (error) {
-        results.push({ externalId, status: "UNKNOWN", error: error instanceof Error ? error.message : String(error) });
+        results.push({
+          externalId,
+          status: "UNKNOWN",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     return results;

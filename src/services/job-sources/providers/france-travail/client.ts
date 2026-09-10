@@ -1,4 +1,5 @@
 import { createLogger } from "@/lib/logger";
+import { getQuotaManager, type QuotaManager, type QuotaPriority } from "../../quota";
 
 /**
  * Client HTTP pour l'API France Travail « Offres d'emploi v2 » (https://francetravail.io).
@@ -18,8 +19,8 @@ export const FRANCE_TRAVAIL_DEFAULTS = {
   baseUrl: "https://api.francetravail.io/partenaire/offresdemploi/v2",
   scope: "api_offresdemploiv2 o2dsoffre",
   timeoutMs: 15_000,
-  /** ≈ 6 requêtes/s, sous la limite documentée de l'API (10 appels/s). */
-  minIntervalMs: 160,
+  /** Intervalle minimal entre deux requêtes d'un même client ; le débit global est tenu par le quota manager. */
+  minIntervalMs: 120,
   maxRetries: 2,
   /** Taille maximale d'une page de résultats (`range` ≤ 150 éléments). */
   pageSize: 150,
@@ -27,7 +28,15 @@ export const FRANCE_TRAVAIL_DEFAULTS = {
   maxRangeEnd: 3149,
 } as const;
 
-export type FtErrorCode = "AUTH" | "RATE_LIMITED" | "BAD_REQUEST" | "NOT_FOUND" | "SERVER" | "TIMEOUT" | "NETWORK" | "PARSE";
+export type FtErrorCode =
+  | "AUTH"
+  | "RATE_LIMITED"
+  | "BAD_REQUEST"
+  | "NOT_FOUND"
+  | "SERVER"
+  | "TIMEOUT"
+  | "NETWORK"
+  | "PARSE";
 
 export class FranceTravailApiError extends Error {
   constructor(
@@ -53,6 +62,8 @@ export type FtClientConfig = {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Quota manager partagé (défaut : celui du fournisseur « france-travail ») ; `null` = désactivé (tests). */
+  quota?: QuotaManager | null;
 };
 
 export type FtSearchParams = {
@@ -73,6 +84,8 @@ export type FtSearchParams = {
   sort?: 0 | 1 | 2;
   range?: { start: number; end: number };
   experienceExigence?: "D" | "S" | "E";
+  /** Priorité dans la file du quota manager (jamais envoyée à l'API). */
+  priority?: QuotaPriority;
 };
 
 export type ContentRange = { start: number; end: number; total: number | null };
@@ -109,10 +122,11 @@ export function parseContentRange(header: string | null): ContentRange | null {
 }
 
 export class FranceTravailClient {
-  private readonly cfg: Required<Omit<FtClientConfig, "fetchImpl" | "sleep" | "now">>;
+  private readonly cfg: Required<Omit<FtClientConfig, "fetchImpl" | "sleep" | "now" | "quota">>;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  readonly quota: QuotaManager | null;
   private token: TokenState | null = null;
   private tokenPromise: Promise<string> | null = null;
   private lastRequestAt = 0;
@@ -122,7 +136,10 @@ export class FranceTravailClient {
 
   constructor(config: FtClientConfig) {
     if (!config.clientId || !config.clientSecret) {
-      throw new FranceTravailApiError("Identifiants France Travail manquants (FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)", "AUTH");
+      throw new FranceTravailApiError(
+        "Identifiants France Travail manquants (FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)",
+        "AUTH",
+      );
     }
     this.cfg = {
       clientId: config.clientId,
@@ -137,6 +154,7 @@ export class FranceTravailClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.sleep = config.sleep ?? defaultSleep;
     this.now = config.now ?? (() => Date.now());
+    this.quota = config.quota === undefined ? getQuotaManager("france-travail") : config.quota;
   }
 
   // ── Authentification ────────────────────────────────────────
@@ -169,14 +187,30 @@ export class FranceTravailClient {
     if (!res.ok) {
       const detail = safeJson(text) as { error?: string; error_description?: string } | null;
       const reason = detail?.error_description ?? detail?.error ?? text.slice(0, 200);
-      log.warn("Authentification refusée", { status: res.status, durationMs: this.now() - started });
-      throw new FranceTravailApiError(`Authentification France Travail refusée (${res.status}) : ${reason || "vérifie le client id / secret et les droits sur l'API Offres d'emploi v2"}`, "AUTH", res.status);
+      log.warn("Authentification refusée", {
+        status: res.status,
+        durationMs: this.now() - started,
+      });
+      throw new FranceTravailApiError(
+        `Authentification France Travail refusée (${res.status}) : ${reason || "vérifie le client id / secret et les droits sur l'API Offres d'emploi v2"}`,
+        "AUTH",
+        res.status,
+      );
     }
     const data = safeJson(text) as { access_token?: string; expires_in?: number } | null;
-    if (!data?.access_token) throw new FranceTravailApiError("Réponse d'authentification inattendue (pas d'access_token)", "PARSE", res.status);
+    if (!data?.access_token)
+      throw new FranceTravailApiError(
+        "Réponse d'authentification inattendue (pas d'access_token)",
+        "PARSE",
+        res.status,
+      );
     const ttl = typeof data.expires_in === "number" && data.expires_in > 0 ? data.expires_in : 1200;
     this.token = { value: data.access_token, expiresAt: this.now() + ttl * 1000 };
-    log.info("Jeton obtenu", { operation: "auth", durationMs: this.now() - started, expiresInSec: ttl });
+    log.info("Jeton obtenu", {
+      operation: "auth",
+      durationMs: this.now() - started,
+      expiresInSec: ttl,
+    });
     return this.token.value;
   }
 
@@ -198,8 +232,15 @@ export class FranceTravailClient {
     try {
       return await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (error) {
-      if ((error as Error)?.name === "AbortError") throw new FranceTravailApiError(`Délai dépassé (${this.cfg.timeoutMs} ms) : ${url.split("?")[0]}`, "TIMEOUT");
-      throw new FranceTravailApiError(`Erreur réseau : ${(error as Error)?.message ?? String(error)}`, "NETWORK");
+      if ((error as Error)?.name === "AbortError")
+        throw new FranceTravailApiError(
+          `Délai dépassé (${this.cfg.timeoutMs} ms) : ${url.split("?")[0]}`,
+          "TIMEOUT",
+        );
+      throw new FranceTravailApiError(
+        `Erreur réseau : ${(error as Error)?.message ?? String(error)}`,
+        "NETWORK",
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -207,63 +248,128 @@ export class FranceTravailClient {
 
   /**
    * Requête authentifiée avec retries : 401 → nouveau jeton (une fois),
-   * 429 → attente Retry-After, 5xx / timeout / réseau → backoff exponentiel.
+   * 429 → pause globale (Retry-After) puis nouvelle tentative, 5xx / timeout / réseau → backoff exponentiel.
+   * Chaque appel passe par le quota manager (débit, concurrence, priorité, quota partagé).
    */
-  async request<T>(path: string, params?: Record<string, string | number | undefined>, attempt = 0, refreshed = false): Promise<{ status: number; body: T | null; headers: Headers }> {
+  async request<T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+    attempt = 0,
+    refreshed = false,
+    priority: QuotaPriority = "backfill",
+  ): Promise<{ status: number; body: T | null; headers: Headers }> {
     const url = new URL(`${this.cfg.baseUrl}${path}`);
-    for (const [k, v] of Object.entries(params ?? {})) if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
+    for (const [k, v] of Object.entries(params ?? {}))
+      if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     const token = await this.getAccessToken();
-    await this.throttle();
-    const started = this.now();
-    this.requestCount++;
+    const release = this.quota ? await this.quota.acquire(priority) : () => undefined;
     let res: Response;
+    let text = "";
+    const started = this.now();
     try {
-      res = await this.doFetch(url.toString(), { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    } catch (error) {
-      if (error instanceof FranceTravailApiError && (error.code === "TIMEOUT" || error.code === "NETWORK") && attempt < this.cfg.maxRetries) {
-        const wait = 500 * 2 ** attempt;
-        log.warn("Requête échouée, nouvelle tentative", { operation: path, errorCode: error.code, attempt: attempt + 1, waitMs: wait });
-        await this.sleep(wait);
-        return this.request<T>(path, params, attempt + 1, refreshed);
+      await this.throttle();
+      this.requestCount++;
+      try {
+        res = await this.doFetch(url.toString(), {
+          headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        });
+      } catch (error) {
+        if (
+          error instanceof FranceTravailApiError &&
+          (error.code === "TIMEOUT" || error.code === "NETWORK") &&
+          attempt < this.cfg.maxRetries
+        ) {
+          const wait = 500 * 2 ** attempt;
+          log.warn("Requête échouée, nouvelle tentative", {
+            operation: path,
+            errorCode: error.code,
+            attempt: attempt + 1,
+            waitMs: wait,
+          });
+          release();
+          await this.sleep(wait);
+          return this.request<T>(path, params, attempt + 1, refreshed, priority);
+        }
+        throw error;
       }
-      throw error;
+      if (res.status !== 204 && res.status !== 429 && res.status < 500) text = await res.text();
+    } finally {
+      release();
     }
     const durationMs = this.now() - started;
 
-    if (res.status === 204) return { status: 204, body: null, headers: res.headers };
+    if (res.status === 204) {
+      this.quota?.reportSuccess();
+      return { status: 204, body: null, headers: res.headers };
+    }
     if (res.status === 401 && !refreshed) {
       log.warn("Jeton refusé, renouvellement", { operation: path });
       await this.getAccessToken(true);
-      return this.request<T>(path, params, attempt, true);
+      return this.request<T>(path, params, attempt, true, priority);
     }
     if (res.status === 429) {
       const retryAfterMs = parseRetryAfter(res.headers.get("retry-after")) ?? 1000 * 2 ** attempt;
+      const pauseMs = this.quota ? this.quota.penalize(retryAfterMs) : retryAfterMs;
       if (attempt < this.cfg.maxRetries) {
-        log.warn("Limite de débit atteinte, attente", { operation: path, waitMs: retryAfterMs, attempt: attempt + 1 });
-        await this.sleep(retryAfterMs);
-        return this.request<T>(path, params, attempt + 1, refreshed);
+        log.warn("Limite de débit atteinte, attente", {
+          operation: path,
+          waitMs: pauseMs,
+          attempt: attempt + 1,
+        });
+        await this.sleep(pauseMs);
+        return this.request<T>(path, params, attempt + 1, refreshed, priority);
       }
-      throw new FranceTravailApiError("Limite de débit France Travail dépassée (429) après plusieurs tentatives", "RATE_LIMITED", 429, retryAfterMs);
+      throw new FranceTravailApiError(
+        "Limite de débit France Travail dépassée (429) après plusieurs tentatives",
+        "RATE_LIMITED",
+        429,
+        pauseMs,
+      );
     }
     if (res.status >= 500) {
       if (attempt < this.cfg.maxRetries) {
         const wait = 800 * 2 ** attempt;
-        log.warn("Erreur serveur France Travail, nouvelle tentative", { operation: path, status: res.status, attempt: attempt + 1, waitMs: wait });
+        log.warn("Erreur serveur France Travail, nouvelle tentative", {
+          operation: path,
+          status: res.status,
+          attempt: attempt + 1,
+          waitMs: wait,
+        });
         await this.sleep(wait);
-        return this.request<T>(path, params, attempt + 1, refreshed);
+        return this.request<T>(path, params, attempt + 1, refreshed, priority);
       }
-      throw new FranceTravailApiError(`Erreur serveur France Travail (${res.status})`, "SERVER", res.status);
+      throw new FranceTravailApiError(
+        `Erreur serveur France Travail (${res.status})`,
+        "SERVER",
+        res.status,
+      );
     }
-    const text = await res.text();
     if (res.status === 400) {
-      const detail = safeJson(text) as { message?: string; error?: string; description?: string } | null;
-      throw new FranceTravailApiError(`Requête invalide (400) : ${detail?.message ?? detail?.description ?? detail?.error ?? text.slice(0, 200)}`, "BAD_REQUEST", 400);
+      const detail = safeJson(text) as {
+        message?: string;
+        error?: string;
+        description?: string;
+      } | null;
+      throw new FranceTravailApiError(
+        `Requête invalide (400) : ${detail?.message ?? detail?.description ?? detail?.error ?? text.slice(0, 200)}`,
+        "BAD_REQUEST",
+        400,
+      );
     }
-    if (res.status === 404 || res.status === 410) throw new FranceTravailApiError("Ressource introuvable (404)", "NOT_FOUND", res.status);
-    if (res.status === 401 || res.status === 403) throw new FranceTravailApiError(`Accès refusé (${res.status}) : vérifie l'abonnement de l'application à l'API Offres d'emploi v2`, "AUTH", res.status);
-    if (!res.ok) throw new FranceTravailApiError(`Réponse inattendue (${res.status})`, "SERVER", res.status);
+    if (res.status === 404 || res.status === 410)
+      throw new FranceTravailApiError("Ressource introuvable (404)", "NOT_FOUND", res.status);
+    if (res.status === 401 || res.status === 403)
+      throw new FranceTravailApiError(
+        `Accès refusé (${res.status}) : vérifie l'abonnement de l'application à l'API Offres d'emploi v2`,
+        "AUTH",
+        res.status,
+      );
+    if (!res.ok)
+      throw new FranceTravailApiError(`Réponse inattendue (${res.status})`, "SERVER", res.status);
     const body = text ? (safeJson(text) as T | null) : null;
-    if (text && body === null) throw new FranceTravailApiError("Réponse non JSON", "PARSE", res.status);
+    if (text && body === null)
+      throw new FranceTravailApiError("Réponse non JSON", "PARSE", res.status);
+    this.quota?.reportSuccess();
     log.debug("Requête réussie", { operation: path, status: res.status, durationMs });
     return { status: res.status, body, headers: res.headers };
   }
@@ -273,8 +379,13 @@ export class FranceTravailClient {
   /** Une page de résultats (`range` 150 max). 204 = aucun résultat. */
   async search(params: FtSearchParams): Promise<FtSearchResponse> {
     const range = params.range ?? { start: 0, end: FRANCE_TRAVAIL_DEFAULTS.pageSize - 1 };
-    if (range.end - range.start + 1 > FRANCE_TRAVAIL_DEFAULTS.pageSize) throw new FranceTravailApiError("range : 150 résultats maximum par page", "BAD_REQUEST");
-    if (range.end > FRANCE_TRAVAIL_DEFAULTS.maxRangeEnd) throw new FranceTravailApiError(`range : l'API n'expose que les ${FRANCE_TRAVAIL_DEFAULTS.maxRangeEnd + 1} premiers résultats`, "BAD_REQUEST");
+    if (range.end - range.start + 1 > FRANCE_TRAVAIL_DEFAULTS.pageSize)
+      throw new FranceTravailApiError("range : 150 résultats maximum par page", "BAD_REQUEST");
+    if (range.end > FRANCE_TRAVAIL_DEFAULTS.maxRangeEnd)
+      throw new FranceTravailApiError(
+        `range : l'API n'expose que les ${FRANCE_TRAVAIL_DEFAULTS.maxRangeEnd + 1} premiers résultats`,
+        "BAD_REQUEST",
+      );
     const query: Record<string, string | number | undefined> = {
       motsCles: params.motsCles,
       commune: params.commune,
@@ -290,8 +401,15 @@ export class FranceTravailClient {
       sort: params.sort,
       range: `${range.start}-${range.end}`,
     };
-    const res = await this.request<{ resultats?: unknown[]; filtresPossibles?: unknown }>("/offres/search", query);
-    if (res.status === 204 || !res.body) return { status: 204, resultats: [], filtresPossibles: null, contentRange: null };
+    const res = await this.request<{ resultats?: unknown[]; filtresPossibles?: unknown }>(
+      "/offres/search",
+      query,
+      0,
+      false,
+      params.priority ?? "backfill",
+    );
+    if (res.status === 204 || !res.body)
+      return { status: 204, resultats: [], filtresPossibles: null, contentRange: null };
     return {
       status: res.status === 206 ? 206 : 200,
       resultats: Array.isArray(res.body.resultats) ? res.body.resultats : [],
@@ -300,8 +418,19 @@ export class FranceTravailClient {
     };
   }
 
-  /** Toutes les pages jusqu'à `maxResults` (borné par l'API à 3 150). */
-  async searchAll(params: Omit<FtSearchParams, "range">, options: { maxResults?: number; onPage?: (page: FtSearchResponse, fetched: number) => void } = {}): Promise<FtSearchAllResult> {
+  /**
+   * Toutes les pages jusqu'à `maxResults` (borné par l'API à 3 150). Avec `stopIfTruncated`, la
+   * pagination s'arrête dès que la première page annonce plus de résultats que `maxResults` : l'appelant
+   * découpera la fenêtre (une seule requête consommée au lieu de vingt et une).
+   */
+  async searchAll(
+    params: Omit<FtSearchParams, "range">,
+    options: {
+      maxResults?: number;
+      stopIfTruncated?: boolean;
+      onPage?: (page: FtSearchResponse, fetched: number) => void;
+    } = {},
+  ): Promise<FtSearchAllResult> {
     const max = Math.min(options.maxResults ?? 1150, FRANCE_TRAVAIL_DEFAULTS.maxRangeEnd + 1);
     const offers: unknown[] = [];
     const warnings: string[] = [];
@@ -314,7 +443,15 @@ export class FranceTravailClient {
       requests++;
       offers.push(...page.resultats);
       options.onPage?.(page, offers.length);
-      if (page.contentRange?.total !== undefined && page.contentRange?.total !== null) total = page.contentRange.total;
+      if (page.contentRange?.total !== undefined && page.contentRange?.total !== null)
+        total = page.contentRange.total;
+      if (options.stopIfTruncated && total !== null && total > max) {
+        offers.length = 0;
+        warnings.push(
+          `Fenêtre trop large : ${total} résultats annoncés pour une borne de ${max}, arrêt après la première page pour découpage.`,
+        );
+        break;
+      }
       if (page.status === 204 || page.resultats.length === 0) break;
       // 200 = dernière page ; 206 = il en reste
       if (page.status === 200) break;
@@ -323,14 +460,23 @@ export class FranceTravailClient {
       start = end + 1;
     }
     const truncated = total !== null && offers.length < total;
-    if (truncated) warnings.push(`Résultats tronqués : ${offers.length} récupérés sur ${total} annoncés (limite ${max}).`);
+    if (truncated)
+      warnings.push(
+        `Résultats tronqués : ${offers.length} récupérés sur ${total} annoncés (limite ${max}).`,
+      );
     return { offers, total: total ?? offers.length, requests, truncated, warnings };
   }
 
   /** Détail d'une offre. `null` si elle n'existe plus (offre retirée / expirée). */
-  async getOffer(id: string): Promise<unknown | null> {
+  async getOffer(id: string, priority: QuotaPriority = "verify"): Promise<unknown | null> {
     try {
-      const res = await this.request<unknown>(`/offres/${encodeURIComponent(id)}`);
+      const res = await this.request<unknown>(
+        `/offres/${encodeURIComponent(id)}`,
+        undefined,
+        0,
+        false,
+        priority,
+      );
       return res.status === 204 ? null : res.body;
     } catch (error) {
       if (error instanceof FranceTravailApiError && error.code === "NOT_FOUND") return null;
@@ -339,8 +485,22 @@ export class FranceTravailClient {
   }
 
   /** Référentiels publics de l'API (communes, naturesContrats, regions, departements, …). */
-  async getReferentiel(name: "communes" | "naturesContrats" | "regions" | "departements" | "typesContrats" | "niveauxFormations"): Promise<unknown[]> {
-    const res = await this.request<unknown[]>(`/referentiel/${name}`);
+  async getReferentiel(
+    name:
+      | "communes"
+      | "naturesContrats"
+      | "regions"
+      | "departements"
+      | "typesContrats"
+      | "niveauxFormations",
+  ): Promise<unknown[]> {
+    const res = await this.request<unknown[]>(
+      `/referentiel/${name}`,
+      undefined,
+      0,
+      false,
+      "recent",
+    );
     return Array.isArray(res.body) ? res.body : [];
   }
 }

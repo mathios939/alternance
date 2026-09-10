@@ -1,19 +1,28 @@
 name: Production sync
 
-# Synchronisation automatique de la base de production (secret DATABASE_URL) :
-# nouvelles offres et mises à jour (jobs:sync), vérification auprès de la source (jobs:verify),
-# expiration (jobs:expire). Idempotente (dédoublonnage par identifiant externe), limitée
-# (départements de la variable SYNC_DEPARTMENTS, 7 jours, plafond par requête), observable
-# (résumé du run + table ingestion_run visible dans /admin/data), jamais concurrente
-# (groupe de concurrence, exécution en cours jamais annulée). Sans secret : SKIPPED.
+# Synchronisation CONTINUE de la base de production (secret DATABASE_URL), toutes les deux heures :
+#   priorité 1 — nouvelles offres (France entière, fenêtre 1 jour) ;
+#   priorité 2 — zones très demandées (fenêtre 7 jours) ;
+#   priorité 3 — recherches populaires dont l'actualisation est ancienne ;
+#   priorité 4 — rattrapage progressif du catalogue (fenêtre 31 jours, N départements les plus anciens) ;
+# puis vérification des offres absentes des derniers listages (jobs:verify), expiration (jobs:expire)
+# et rapport de couverture réelle (db:coverage).
+# Reprenable (points de reprise par département), idempotente (dédoublonnage par identifiant externe),
+# bornée (quota France Travail partagé, budget de temps), observable (résumé du run, table sync_checkpoint
+# visible dans /admin/data), jamais concurrente (groupe de concurrence, exécution en cours jamais annulée).
+# Sans secret : SKIPPED.
 on:
   schedule:
-    - cron: "17 5,11,17 * * *" # trois fois par jour (UTC)
+    - cron: "23 */2 * * *" # toutes les deux heures (UTC)
   workflow_dispatch:
     inputs:
-      departments:
-        description: "Départements à synchroniser (codes séparés par des virgules)"
-        default: ""
+      max_minutes:
+        description: "Budget de temps de la synchronisation (minutes)"
+        default: "100"
+        required: false
+      backfill_budget:
+        description: "Départements à rattraper (fenêtre 31 j) par exécution"
+        default: "12"
         required: false
 
 concurrency:
@@ -25,9 +34,9 @@ permissions:
 
 jobs:
   sync:
-    name: sync → verify → expire
+    name: sync national → verify → expire → couverture
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 170
     env:
       NODE_VERSION: "22"
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
@@ -35,6 +44,7 @@ jobs:
       NEXT_PUBLIC_DEMO_MODE: "false"
       NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
       BETTER_AUTH_SECRET: ci-sync-placeholder-not-a-secret
+      FRANCE_TRAVAIL_MAX_RPS: ${{ vars.FRANCE_TRAVAIL_MAX_RPS || '3' }}
     steps:
       - name: Vérifier la présence des secrets (valeurs jamais affichées)
         id: check
@@ -64,33 +74,51 @@ jobs:
         if: steps.check.outputs.configured == 'true'
         run: npm ci
 
-      - name: Synchroniser, vérifier, expirer
+      - name: Migrations (prisma migrate deploy uniquement, connexion directe)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          POOLED_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          export DATABASE_URL="${POOLED_URL/-pooler./.}"
+          for i in 1 2 3; do
+            if npx prisma migrate deploy; then exit 0; fi
+            echo "Tentative $i échouée, nouvelle tentative dans 15 s…"; sleep 15
+          done
+          exit 1
+
+      - name: Synchronisation nationale incrémentale (priorités 1 → 4)
         if: steps.check.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
           FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
-          DEPARTMENTS: ${{ inputs.departments || vars.SYNC_DEPARTMENTS || '44' }}
+          MAX_MINUTES: ${{ inputs.max_minutes || '100' }}
+          BUDGET: ${{ inputs.backfill_budget || '12' }}
         run: |
-          printf '## Production sync (%s)\n\nDépartements : `%s`\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DEPARTMENTS" >> "$GITHUB_STEP_SUMMARY"
-          IFS=',' read -ra DEPTS <<< "$DEPARTMENTS"
-          for d in "${DEPTS[@]}"; do
-            d="$(echo "$d" | tr -d ' ')"
-            [ -z "$d" ] && continue
-            npm run jobs:sync -- --department "$d" --since-days 7 --limit 300 --trigger cron | tee "sync-$d.log"
-            grep -E "récupérées|Ignorée|ERREUR|ÉCHEC" "sync-$d.log" | sed 's/\x1b\[[0-9;]*m//g' >> "$GITHUB_STEP_SUMMARY" || true
-          done
-          npm run jobs:verify -- --limit 300 | tee verify.log
+          printf '## Production sync (%s)\n\nBudget : %s min · rattrapage : %s département(s)\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MAX_MINUTES" "$BUDGET" >> "$GITHUB_STEP_SUMMARY"
+          npm run jobs:sync:national -- --mode incremental --max-minutes "$MAX_MINUTES" --backfill-budget "$BUDGET" --trigger cron | tee sync.log
+          grep -E "^\s*(OK|!!|KO)|Nouveautés|Zones demandées|Rattrapage|recherche\(s\) rafraîchie|requêtes sur" sync.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 60 >> "$GITHUB_STEP_SUMMARY" || true
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Vérification (offres absentes des listages d'abord) et expiration
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: |
+          printf '\n### Vérification et expiration\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run jobs:verify -- --limit 600 --older-than-hours 24 --trigger cron | tee verify.log
           grep -iE "vérifi|ERREUR|ÉCHEC" verify.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 5 >> "$GITHUB_STEP_SUMMARY" || true
-          npm run jobs:expire | tee expire.log
+          npm run jobs:expire -- --trigger cron | tee expire.log
           grep -iE "expir|UNKNOWN|ERREUR|ÉCHEC" expire.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 5 >> "$GITHUB_STEP_SUMMARY" || true
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: État de la base
+      - name: Couverture réelle
         if: steps.check.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          printf '\n### État de la base\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
-          npm run db:report | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '\n### Couverture réelle\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:coverage | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"

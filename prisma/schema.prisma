@@ -162,6 +162,20 @@ enum SyncStatus {
   DISABLED
 }
 
+/// Nature d'un point de reprise de synchronisation : territoire (département) ou recherche live.
+enum SyncCheckpointKind {
+  TERRITORY
+  LIVE_SEARCH
+}
+
+enum SyncCheckpointStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  PARTIAL
+  ERROR
+}
+
 enum RecommendationType {
   JOB
   COMPANY
@@ -739,6 +753,8 @@ model Job {
 
   publishedAt      DateTime
   discoveredAt     DateTime      @default(now())
+  /// Dernière actualisation déclarée par la source (ex. `dateActualisation` France Travail).
+  sourceUpdatedAt  DateTime?
   expiresAt        DateTime?
   source           JobSourceType @default(MANUAL)
   sourceUrl        String?
@@ -763,6 +779,10 @@ model Job {
   duplicateConfidence Int?
 
   viewCount Int @default(0)
+
+  /// Vecteur plein texte (titre + description + compétences, configuration `french_unaccent`),
+  /// colonne GÉNÉRÉE par PostgreSQL (migration `search_vector`) et indexée en GIN : jamais écrite par l'application.
+  searchVector Unsupported("tsvector")?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -792,6 +812,7 @@ model Job {
   @@index([verificationStatus])
   @@index([lastVerifiedAt])
   @@index([isDemo])
+  @@index([discoveredAt])
   @@map("job")
 }
 
@@ -871,10 +892,14 @@ model JobSourceEntry {
   applicationLabel    String?
   rawPayload          Json?
   publishedAt         DateTime?
+  /// Dernière actualisation déclarée par la source : une offre inchangée n'est pas réécrite.
+  sourceUpdatedAt     DateTime?
   expiresAt           DateTime?
   /// Statut propre à cette source (une offre peut être retirée d'une source et rester sur une autre).
   status              JobVerificationStatus @default(ACTIVE)
   lastVerifiedAt      DateTime?
+  /// Nombre de listages complets consécutifs de la source où l'offre était absente (0 = vue au dernier).
+  missedListings      Int                   @default(0)
   /// Confiance (0-1) du rapprochement avec l'offre canonique quand l'entrée vient d'une autre source.
   duplicateConfidence Float?
   isPrimary           Boolean               @default(false)
@@ -884,7 +909,64 @@ model JobSourceEntry {
   @@unique([sourceId, externalId])
   @@index([jobId])
   @@index([status, lastSeenAt])
+  @@index([sourceId, lastVerifiedAt])
   @@map("job_source_entry")
+}
+
+/// Point de reprise de synchronisation (Phase 30) : une ligne par (fournisseur, nature, territoire, fenêtre).
+/// Permet de reprendre une ingestion nationale interrompue sans repartir de zéro, et d'observer la couverture.
+model SyncCheckpoint {
+  id             String               @id @default(cuid())
+  provider       String
+  kind           SyncCheckpointKind   @default(TERRITORY)
+  /// Code département (« 44 ») pour un territoire ; clé normalisée de recherche pour une recherche live.
+  territory      String
+  /// Fenêtre de publication couverte (« 31d », « 7d », « 1d », « live »).
+  window         String
+  status         SyncCheckpointStatus @default(PENDING)
+  priority       Int                  @default(50)
+  /// Position courante : morceaux (fenêtre temporelle × nature de contrat) restant à traiter.
+  cursor         Json?
+  /// Position à laquelle reprendre après une interruption.
+  nextCursor     Json?
+  lockedBy       String?
+  lockedAt       DateTime?
+  lastStartedAt  DateTime?
+  lastSuccessAt  DateTime?
+  lastError      String?
+  runCount       Int                  @default(0)
+  hitCount       Int                  @default(0)
+  fetchedCount   Int                  @default(0)
+  createdCount   Int                  @default(0)
+  updatedCount   Int                  @default(0)
+  duplicateCount Int                  @default(0)
+  rejectedCount  Int                  @default(0)
+  failedCount    Int                  @default(0)
+  removedCount   Int                  @default(0)
+  requestCount   Int                  @default(0)
+  totalAnnounced Int?
+  truncated      Boolean              @default(false)
+  durationMs     Int?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([provider, kind, territory, window])
+  @@index([provider, kind, status])
+  @@index([provider, kind, lastSuccessAt])
+  @@map("sync_checkpoint")
+}
+
+/// Compteur d'appels sortants par fournisseur et par minute : quota global partagé entre processus
+/// (workers GitHub Actions et fonctions serverless ne dépassent jamais ensemble la limite officielle).
+model ProviderQuota {
+  id       String   @id @default(cuid())
+  provider String
+  /// Minute UTC tronquée.
+  bucket   DateTime
+  requests Int      @default(0)
+
+  @@unique([provider, bucket])
+  @@map("provider_quota")
 }
 
 // ═══════════════════════ CANDIDATURES ════════════════════════

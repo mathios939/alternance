@@ -1,4 +1,11 @@
-import type { ContractType, EducationLevel, JobSourceType, RemotePolicy, SalaryPeriod, WorkRhythm } from "@/generated/prisma/enums";
+import type {
+  ContractType,
+  EducationLevel,
+  JobSourceType,
+  RemotePolicy,
+  SalaryPeriod,
+  WorkRhythm,
+} from "@/generated/prisma/enums";
 
 /**
  * Format brut renvoyé par un fournisseur d'offres, avant normalisation.
@@ -116,6 +123,14 @@ export type FetchParams = {
   since?: Date;
   /** Nombre de jours max depuis la publication (si la source le supporte). */
   publishedWithinDays?: number;
+  /** Borne haute de date de création (fenêtre temporelle explicite, avec `since`). */
+  until?: Date;
+  /** Sous-ensemble de natures de contrat à demander à la source (découpe d'une fenêtre tronquée). */
+  contractNatures?: string[];
+  /** Priorité dans la file du quota manager. */
+  priority?: "live" | "recent" | "verify" | "backfill";
+  /** Si la source annonce plus de résultats que `limit`, ne rien récupérer (l'appelant découpera la fenêtre). */
+  stopIfTruncated?: boolean;
 };
 
 /** Ce qu'une source sait faire. Déclaré explicitement pour ne rien supposer (Phase 14). */
@@ -149,9 +164,16 @@ export type FetchPage = {
   requests: number;
   /** Avertissements non bloquants (offres ignorées par la source, pages tronquées…). */
   warnings: string[];
+  /** La source annonçait plus de résultats que ce qui a pu être récupéré (borne de pagination). */
+  truncated?: boolean;
 };
 
-export type VerificationResult = { externalId: string; status: "ACTIVE" | "REMOVED" | "UNKNOWN"; job?: RawJob | null; error?: string };
+export type VerificationResult = {
+  externalId: string;
+  status: "ACTIVE" | "REMOVED" | "UNKNOWN";
+  job?: RawJob | null;
+  error?: string;
+};
 
 /**
  * Contrat que chaque source d'offres doit respecter.
@@ -170,6 +192,8 @@ export interface JobSourceProvider {
   fetchJobs(params: FetchParams): Promise<FetchPage>;
   /** Détail / existence d'une offre. `job: null` = retirée de la source. */
   verifyJobs?(externalIds: string[]): Promise<VerificationResult[]>;
+  /** Codes de nature de contrat alternance de la source (découpe d'une fenêtre tronquée par nature). */
+  contractNatures?(): Promise<string[]>;
 }
 
 export type IngestReport = {
@@ -177,11 +201,18 @@ export type IngestReport = {
   runId: string | null;
   fetched: number;
   created: number;
+  /** Offres déjà connues revues dans ce lot (dont `unchanged`, non réécrites). */
   updated: number;
+  /** Offres revues dont la source n'a pas changé la date d'actualisation : simple pointage. */
+  unchanged: number;
   duplicates: number;
   rejected: number;
   failed: number;
   errors: string[];
   warnings: string[];
   durationMs: number;
+  /** Total annoncé par la source, requêtes HTTP effectuées, troncature éventuelle. */
+  total: number | null;
+  requests: number;
+  truncated: boolean;
 };

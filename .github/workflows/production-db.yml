@@ -80,13 +80,21 @@ jobs:
         if: steps.check.outputs.configured == 'true'
         run: npm ci
 
-      - name: Appliquer les migrations (prisma migrate deploy)
+      - name: Appliquer les migrations (prisma migrate deploy, connexion directe, 3 tentatives)
         if: steps.check.outputs.configured == 'true'
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POOLED_URL: ${{ secrets.DATABASE_URL }}
           BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
         run: |
-          npx prisma migrate deploy
+          # Le verrou consultatif de Prisma Migrate ne traverse pas un pooler en mode transaction (Neon « -pooler ») :
+          # les migrations passent par l'hôte direct (même identifiants), la valeur n'est jamais affichée.
+          export DATABASE_URL="${POOLED_URL/-pooler./.}"
+          ok=0
+          for i in 1 2 3; do
+            if npx prisma migrate deploy; then ok=1; break; fi
+            echo "Tentative $i échouée, nouvelle tentative dans 15 s…"; sleep 15
+          done
+          [ "$ok" = "1" ] || exit 1
           npx prisma migrate status
           printf '## Production database\n\n- Migrations : ✅ appliquées (`prisma migrate deploy`)\n' >> "$GITHUB_STEP_SUMMARY"
 

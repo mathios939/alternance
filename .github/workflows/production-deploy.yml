@@ -131,12 +131,20 @@ jobs:
           fi
           if [ -n "$ADMIN_EMAILS" ]; then upsert ADMIN_EMAILS "$ADMIN_EMAILS"; fi
 
-      - name: Appliquer les migrations (prisma migrate deploy)
+      - name: Appliquer les migrations (prisma migrate deploy, connexion directe, 3 tentatives)
         if: steps.check.outputs.configured == 'true'
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POOLED_URL: ${{ secrets.DATABASE_URL }}
           BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
-        run: npx prisma migrate deploy
+        run: |
+          # Le verrou consultatif de Prisma Migrate ne traverse pas un pooler en mode transaction (Neon « -pooler ») :
+          # les migrations passent par l'hôte direct (même identifiants), la valeur n'est jamais affichée.
+          export DATABASE_URL="${POOLED_URL/-pooler./.}"
+          for i in 1 2 3; do
+            if npx prisma migrate deploy; then exit 0; fi
+            echo "Tentative $i échouée, nouvelle tentative dans 15 s…"; sleep 15
+          done
+          exit 1
 
       - name: Déployer en production (build exécuté chez Vercel)
         if: steps.check.outputs.configured == 'true'
