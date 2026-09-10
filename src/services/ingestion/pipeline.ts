@@ -66,11 +66,11 @@ class DedupeIndex {
 async function loadDedupeIndex(now: Date): Promise<DedupeIndex> {
   const rows = await prisma.job.findMany({
     where: { isDemo: false, isActive: true, canonicalJobId: null, publishedAt: { gte: new Date(now.getTime() - DEDUPE_WINDOW_DAYS * 86_400_000) } },
-    select: { id: true, title: true, normalizedTitle: true, city: true, postalCode: true, description: true, sourceUrl: true, applicationUrl: true, publishedAt: true, company: { select: { name: true } } },
+    select: { id: true, title: true, normalizedTitle: true, city: true, postalCode: true, description: true, sourceUrl: true, applicationUrl: true, publishedAt: true, company: { select: { name: true } }, sourceEntries: { select: { source: { select: { key: true } } }, orderBy: { isPrimary: "desc" }, take: 1 } },
     take: 20_000,
   });
   const index = new DedupeIndex();
-  for (const r of rows) index.add({ id: r.id, title: r.title, normalizedTitle: r.normalizedTitle, companyName: r.company.name, city: r.city, postalCode: r.postalCode, description: r.description, sourceUrl: r.sourceUrl, applicationUrl: r.applicationUrl, publishedAt: r.publishedAt });
+  for (const r of rows) index.add({ id: r.id, title: r.title, normalizedTitle: r.normalizedTitle, companyName: r.company.name, city: r.city, postalCode: r.postalCode, description: r.description, sourceUrl: r.sourceUrl, applicationUrl: r.applicationUrl, publishedAt: r.publishedAt, sourceKey: r.sourceEntries[0]?.source.key ?? null });
   return index;
 }
 
@@ -207,6 +207,7 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
 
   const rejectedBy: Partial<Record<RejectCode, number>> = {};
   let probable = 0;
+  let sameSourceProbable = 0;
   let companiesCreated = 0;
   let contactsCreated = 0;
 
@@ -247,8 +248,15 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
           continue;
         }
 
-        // DEDUPLICATION 2 : même offre venue d'une autre source → rattachement à l'offre canonique
-        const match = index.find(toCandidate(job));
+        // DEDUPLICATION 2 : même offre venue d'une autre source → rattachement à l'offre canonique.
+        // Un doublon seulement « probable » entre deux offres de la MÊME source (identifiants distincts)
+        // est traité comme une offre distincte : la source lui a attribué son propre identifiant
+        // (employeur publiant plusieurs postes proches). Constaté sur les données réelles France Travail.
+        let match = index.find(toCandidate(job));
+        if (match && match.verdict.level === "probable" && match.match.sourceKey === provider.key) {
+          sameSourceProbable++;
+          match = null;
+        }
         if (match && match.verdict.level === "duplicate") {
           await prisma.jobSourceEntry.create({ data: { jobId: match.match.id, sourceId: source.id, externalId: job.externalId, duplicateConfidence: match.verdict.confidence, ...entryColumns(job, ts) } });
           await prisma.job.update({ where: { id: match.match.id }, data: { isActive: true, verificationStatus: "ACTIVE", lastVerifiedAt: ts } });
@@ -292,13 +300,14 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
     }
 
     if (Object.keys(rejectedBy).length) report.warnings.push(`Rejets : ${Object.entries(rejectedBy).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-    if (probable) report.warnings.push(`${probable} doublon(s) probable(s) créé(s) masqué(s), à vérifier dans l'admin.`);
+    if (probable) report.warnings.push(`${probable} doublon(s) probable(s) inter-sources créé(s) masqué(s), à vérifier dans l'admin.`);
+    if (sameSourceProbable) report.warnings.push(`${sameSourceProbable} offre(s) proche(s) d'une autre offre de la même source conservée(s) distincte(s).`);
 
     const runStatus = report.failed > 0 || report.errors.length > 0 ? "PARTIAL" : "SUCCESS";
     report.durationMs = now().getTime() - startedAt.getTime();
     await finishRun(run.id, { status: runStatus, startedAt, now: now(), errors: report.errors, counters: { fetchedCount: report.fetched, createdCount: report.created, updatedCount: report.updated, duplicateCount: report.duplicates, rejectedCount: report.rejected, failedCount: report.failed } });
     await prisma.jobSource.update({ where: { id: source.id }, data: { lastSyncAt: now(), lastSyncStatus: runStatus === "SUCCESS" ? "SUCCESS" : "ERROR", lastSyncError: report.errors[0] ?? null, jobsCount: { increment: report.created } } });
-    log.info("Ingestion terminée", { provider: provider.key, operation: "ingest", status: runStatus.toLowerCase(), durationMs: report.durationMs, fetched: report.fetched, created: report.created, updated: report.updated, duplicates: report.duplicates, rejected: report.rejected, failed: report.failed, companiesCreated, contactsCreated, warnings: report.warnings.length });
+    log.info("Ingestion terminée", { provider: provider.key, operation: "ingest", status: runStatus.toLowerCase(), durationMs: report.durationMs, fetched: report.fetched, created: report.created, updated: report.updated, duplicates: report.duplicates, probable, sameSourceProbable, rejected: report.rejected, failed: report.failed, companiesCreated, contactsCreated, warnings: report.warnings.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     report.errors.push(message);

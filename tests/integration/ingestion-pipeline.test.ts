@@ -43,8 +43,20 @@ const jobB: RawJob = {
   sourceUrl: "https://source-a.example/offres/B",
 };
 const rejected: RawJob = { externalId: `${PREFIX}R`, title: "Trop court", companyName: "X", description: "court", city: "Nantes", publishedAt: new Date("2026-09-01") };
+/** Même employeur, poste voisin, identifiant distinct dans la même source : doit rester une offre distincte. */
+const jobA2: RawJob = {
+  ...jobA,
+  externalId: `${PREFIX}A2`,
+  title: "Développeur web front-end en alternance (H/F)",
+  description: "Contrat d'apprentissage de 24 mois à Nantes : développement d'interfaces web React au sein d'une équipe produit de huit personnes, revues de code et tests automatisés, accompagnement par un tuteur.",
+  sourceUrl: "https://source-a.example/offres/A2",
+  applicationUrl: "https://itest-atlantic.example/carrieres/dev-front",
+  applicationLabel: null,
+  applicationEmail: null,
+  publishedAt: new Date("2026-09-02"),
+};
 
-const providerA = new ManualProvider(async () => [jobA, jobB, rejected], { key: `${PREFIX}source-a`, name: "Source A (test)", priority: 40 });
+const providerA = new ManualProvider(async () => [jobA, jobA2, jobB, rejected], { key: `${PREFIX}source-a`, name: "Source A (test)", priority: 40 });
 /** Même offre que A, vue depuis une seconde source à priorité plus haute (page carrière). */
 const providerB = new ManualProvider(
   async () => [{ ...jobA, externalId: `${PREFIX}A-bis`, title: "Développeur web H/F – alternance", sourceUrl: "https://source-b.example/jobs/42", applicationUrl: "https://itest-atlantic.example/carrieres/dev-web", publishedAt: new Date("2026-09-02") }],
@@ -71,15 +83,18 @@ describe.skipIf(!process.env["DATABASE_URL"])("pipeline d'ingestion (base locale
 
   it("crée les offres valides, rejette les invalides et journalise l'exécution", async () => {
     const report = await runIngestion({ provider: providerA, trigger: "test", now });
-    expect(report.fetched).toBe(3);
-    expect(report.created).toBe(2);
+    expect(report.fetched).toBe(4);
+    expect(report.created).toBe(3);
     expect(report.rejected).toBe(1);
+    // A et A2 se ressemblent (même employeur, même ville) mais portent des identifiants distincts
+    // dans la même source : toutes deux restent visibles.
+    expect(await prisma.job.count({ where: { company: { name: "Itest Atlantic Software" }, canonicalJobId: null } })).toBe(2);
     expect(report.failed).toBe(0);
     expect(report.errors).toEqual([]);
     expect(report.runId).toBeTruthy();
     const run = await prisma.ingestionRun.findUniqueOrThrow({ where: { id: report.runId! } });
     expect(run.status).toBe("SUCCESS");
-    expect(run.createdCount).toBe(2);
+    expect(run.createdCount).toBe(3);
     expect(run.rejectedCount).toBe(1);
     expect(run.finishedAt).not.toBeNull();
 
@@ -111,9 +126,9 @@ describe.skipIf(!process.env["DATABASE_URL"])("pipeline d'ingestion (base locale
   it("met à jour sans dupliquer lors d'une seconde exécution", async () => {
     const report = await runIngestion({ provider: providerA, trigger: "test", now });
     expect(report.created).toBe(0);
-    expect(report.updated).toBe(2);
+    expect(report.updated).toBe(3);
     expect(report.rejected).toBe(1);
-    expect(await prisma.job.count({ where: { company: { name: "Itest Atlantic Software" } } })).toBe(1);
+    expect(await prisma.job.count({ where: { company: { name: "Itest Atlantic Software" } } })).toBe(2);
   });
 
   it("rattache la même offre venue d'une autre source et préfère la page carrière pour candidater", async () => {
@@ -126,8 +141,8 @@ describe.skipIf(!process.env["DATABASE_URL"])("pipeline d'ingestion (base locale
     expect(primary?.source.key).toBe(`${PREFIX}source-b`);
     expect(job.applicationUrl).toBe("https://itest-atlantic.example/carrieres/dev-web");
     expect(job.sourceEntries.find((e) => e.externalId === `${PREFIX}A-bis`)?.duplicateConfidence).toBeGreaterThanOrEqual(0.92);
-    // Une seule offre visible pour l'utilisateur
-    expect(await prisma.job.count({ where: { company: { name: "Itest Atlantic Software" }, canonicalJobId: null } })).toBe(1);
+    // Toujours deux offres visibles (A rattachée à sa copie de la source B, A2 distincte)
+    expect(await prisma.job.count({ where: { company: { name: "Itest Atlantic Software" }, canonicalJobId: null } })).toBe(2);
   });
 
   it("marque UNKNOWN puis EXPIRED les offres non re-vérifiées, sans toucher aux offres de démonstration", async () => {

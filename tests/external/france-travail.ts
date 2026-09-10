@@ -79,28 +79,46 @@ void runExternalTest("France Travail", "france-travail", async (ctx) => {
     if (!commune) return "ignoré (commune inconnue)";
     const { stripAccents } = await import("../../src/lib/text/normalize");
     const nature = (await provider.alternanceNatureCodes()).join(",");
+    type Sample = { natureContrat?: string; typeContratLibelle?: string; alternance?: boolean };
     const count = async (params: Parameters<typeof client.search>[0]) => {
       const r = await client.search({ ...params, range: { start: 0, end: 49 } });
-      return r.contentRange?.total ?? r.resultats.length;
+      return { total: r.contentRange?.total ?? r.resultats.length, results: r.resultats as Sample[] };
     };
     const base = { commune: commune.inseeCode, distance: radius };
-    const all = await count(base);
-    const alternance = await count({ ...base, natureContrat: nature });
-    const keyword = await count({ ...base, natureContrat: nature, motsCles: q });
-    const plain = stripAccents(q) !== q ? await count({ ...base, natureContrat: nature, motsCles: stripAccents(q) }) : keyword;
-    const keywordNoNature = await count({ ...base, motsCles: q });
+    const all = (await count(base)).total;
+    const alternance = (await count({ ...base, natureContrat: nature })).total;
+    const keyword = (await count({ ...base, natureContrat: nature, motsCles: q })).total;
+    const plain = stripAccents(q) !== q ? (await count({ ...base, natureContrat: nature, motsCles: stripAccents(q) })).total : keyword;
+    const noNature = await count({ ...base, motsCles: q });
+    // Répartition des natures de contrat parmi les offres « mot-clé » sans filtre : révèle des offres
+    // d'alternance étiquetées autrement que E2 / FS (elles échapperaient au filtre).
+    const natures: Record<string, number> = {};
+    let flaggedAlternance = 0;
+    let flaggedOutsideCodes = 0;
+    for (const o of noNature.results) {
+      const key = o.natureContrat ?? "?";
+      natures[key] = (natures[key] ?? 0) + 1;
+      if (o.alternance === true) {
+        flaggedAlternance++;
+        if (!/apprentissage|professionnalisation/i.test(key)) flaggedOutsideCodes++;
+      }
+    }
     ctx.detail("diag.radiusOnly", all);
     ctx.detail("diag.alternance", alternance);
     ctx.detail("diag.alternanceKeyword", keyword);
     ctx.detail("diag.alternanceKeywordNoAccent", plain);
-    ctx.detail("diag.keywordNoNature", keywordNoNature);
+    ctx.detail("diag.keywordNoNature", noNature.total);
+    ctx.detail("diag.keywordNoNature.natures", Object.entries(natures).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—");
+    ctx.detail("diag.keywordNoNature.flaggedAlternance", `${flaggedAlternance}/${noNature.results.length}`);
+    ctx.detail("diag.keywordNoNature.alternanceOutsideCodes", flaggedOutsideCodes);
+    if (flaggedOutsideCodes > 0) ctx.warn(`${flaggedOutsideCodes} offre(s) « ${q} » marquée(s) alternance=true avec une nature hors ${nature} : le filtre natureContrat en laisse échapper.`);
     const samples = (page?.jobs ?? []).slice(0, 3).map((j) => {
       const o = j.raw as { natureContrat?: string; typeContratLibelle?: string; alternance?: boolean } | undefined;
       return `${j.externalId}: nature=« ${o?.natureContrat ?? "?"} » type=« ${o?.typeContratLibelle ?? "?"} » alternance=${String(o?.alternance)}`;
     });
     for (const s of samples) ctx.info(s);
     if (alternance > 0 && keyword === 0) ctx.warn(`Le mot-clé « ${q} » ne renvoie rien alors que ${alternance} offre(s) d'alternance existent dans le rayon : vérifier la sémantique de motsCles.`);
-    return `rayon seul=${all} · nature ${nature}=${alternance} · + « ${q} »=${keyword} · + « ${stripAccents(q)} »=${plain} · « ${q} » sans filtre nature=${keywordNoNature}`;
+    return `rayon seul=${all} · nature ${nature}=${alternance} · + « ${q} »=${keyword} · + « ${stripAccents(q)} »=${plain} · « ${q} » sans filtre nature=${noNature.total} (alternance=true : ${flaggedAlternance}, hors codes : ${flaggedOutsideCodes})`;
   });
 
   await ctx.step("Validation et normalisation", async () => {
