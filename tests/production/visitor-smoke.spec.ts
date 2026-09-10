@@ -53,10 +53,27 @@ test.beforeEach(async ({ context }) => {
 });
 
 async function expectNoHorizontalOverflow(page: Page, label: string) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow, `débordement horizontal sur ${label} (${overflow}px)`).toBeLessThanOrEqual(1);
+  const info = await page.evaluate(() => {
+    const cw = document.documentElement.clientWidth;
+    const offenders: string[] = [];
+    for (const el of Array.from(document.querySelectorAll("body *"))) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.right > cw + 1 && getComputedStyle(el).position !== "fixed") {
+        const cls = typeof el.className === "string" ? el.className.slice(0, 80) : "";
+        offenders.push(
+          `${el.tagName.toLowerCase()}.${cls} right=${Math.round(r.right)} « ${(el.textContent ?? "").trim().slice(0, 40)} »`,
+        );
+      }
+    }
+    return {
+      overflow: document.documentElement.scrollWidth - cw,
+      offenders: offenders.slice(0, 10),
+    };
+  });
+  expect(
+    info.overflow,
+    `débordement horizontal sur ${label} (${info.overflow}px) : ${info.offenders.join(" | ")}`,
+  ).toBeLessThanOrEqual(1);
 }
 
 test("les pages publiques répondent en 200 sans redirection vers la connexion", async ({
