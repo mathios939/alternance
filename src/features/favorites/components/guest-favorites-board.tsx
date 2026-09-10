@@ -55,7 +55,7 @@ export function GuestFavoritesBoard() {
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-primary-soft/40 p-4 text-sm">
         <Lock className="size-4 shrink-0 text-primary" aria-hidden />
         <p className="min-w-0 flex-1">
-          <span className="font-medium">Sauvegardés dans ce navigateur uniquement.</span> Crée un compte gratuitement pour retrouver tes favoris sur tous tes appareils : ils seront importés automatiquement.
+          <span className="font-medium">Sauvegardés dans ce navigateur uniquement.</span> Crée un compte gratuitement pour retrouver tes favoris sur tous tes appareils : après l'inscription, tu pourras les ajouter à ton compte en un clic.
         </p>
         <Button asChild size="sm">
           <Link href="/register?next=/favorites">Créer un compte gratuitement</Link>

@@ -29,6 +29,8 @@ type Props = { providers: { google: boolean; microsoft: boolean }; next: string 
 
 export function RegisterForm({ providers, next }: Props) {
   const router = useRouter();
+  // La destination demandée avant l'inscription est conservée jusqu'à la fin de l'onboarding.
+  const onboardingUrl = next !== "/dashboard" ? `/onboarding?next=${encodeURIComponent(next)}` : "/onboarding";
   const [form, setForm] = useState({ name: "", email: "", password: "", terms: false });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -44,13 +46,13 @@ export function RegisterForm({ providers, next }: Props) {
     }
     setFieldErrors({});
     setLoading(true);
-    const { error: err } = await signUp.email({ name: parsed.data.name, email: parsed.data.email, password: parsed.data.password, callbackURL: "/onboarding" });
+    const { error: err } = await signUp.email({ name: parsed.data.name, email: parsed.data.email, password: parsed.data.password, callbackURL: onboardingUrl });
     setLoading(false);
     if (err) {
       setError(err.status === 422 || err.code === "USER_ALREADY_EXISTS" ? "Un compte existe déjà avec cet email." : (err.message ?? "Impossible de créer le compte."));
       return;
     }
-    router.push("/onboarding");
+    router.push(onboardingUrl);
     router.refresh();
   }
 
@@ -63,7 +65,7 @@ export function RegisterForm({ providers, next }: Props) {
         <CardDescription>Gratuit. Moins de 3 minutes pour configurer ton assistant.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <SocialButtons providers={providers} callbackURL="/onboarding" />
+        <SocialButtons providers={providers} callbackURL={onboardingUrl} />
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div className="space-y-2">
             <Label htmlFor="name">Prénom</Label>

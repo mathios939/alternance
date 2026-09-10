@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
-import { AUTH_PAGES, isProtectedPath, loginUrlFor } from "@/config/routes";
+import { REQUEST_PATH_HEADER, isAuthPage, isProtectedPath, loginUrlFor, safeReturnTo } from "@/config/routes";
 
 /**
  * Vérification optimiste (présence du cookie de session) pour rediriger tôt,
@@ -9,15 +9,20 @@ import { AUTH_PAGES, isProtectedPath, loginUrlFor } from "@/config/routes";
  * jamais de redirection vers /login. La vérification réelle de la session est faite dans les pages serveur.
  */
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
   const sessionCookie = getSessionCookie(request, { cookiePrefix: "aos" });
   if (isProtectedPath(pathname) && !sessionCookie) {
-    return NextResponse.redirect(new URL(loginUrlFor(pathname), request.url));
+    return NextResponse.redirect(new URL(loginUrlFor(`${pathname}${search}`), request.url));
   }
-  if ((AUTH_PAGES as readonly string[]).includes(pathname) && sessionCookie) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (isAuthPage(pathname) && sessionCookie) {
+    // Déjà connecté : on honore la destination demandée plutôt que d'imposer le tableau de bord.
+    return NextResponse.redirect(new URL(safeReturnTo(request.nextUrl.searchParams.get("next")), request.url));
   }
-  return NextResponse.next();
+  // Chemin demandé transmis aux composants serveur (requireUser) pour conserver la destination
+  // quand une session expirée est détectée après le proxy. Toute valeur venue du client est écrasée.
+  const headers = new Headers(request.headers);
+  headers.set(REQUEST_PATH_HEADER, `${pathname}${search}`);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {

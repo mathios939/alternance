@@ -15,6 +15,7 @@ import {
 import { getSearchProvider } from "@/lib/search";
 import { demoFilter } from "@/lib/demo-mode";
 import { createLogger } from "@/lib/logger";
+import { safeExternalUrl } from "@/lib/external-url";
 import { CITIES } from "@/config/cities";
 import { type JobFilters, publishedWithinToDate } from "@/features/jobs/lib/filters";
 import type { JobCardData, JobDetailData, JobSearchResult } from "@/features/jobs/types";
@@ -134,7 +135,7 @@ export function toJobCard(job: JobWithCard, ctx: UserContext, enrichment?: Enric
     sourceLabel: SOURCE_LABELS[job.source] ?? job.source,
     sourceCount: Math.max(1, job._count.sourceEntries),
     company: { id: job.company.id, slug: job.company.slug, name: job.company.name, logoUrl: job.company.logoUrl, size: job.company.size, sector: job.company.sector, isPlaceholder: job.company.isPlaceholder },
-    applicationUrl: job.applicationUrl,
+    applicationUrl: safeExternalUrl(job.applicationUrl),
     match,
     distanceKm,
     priority,
@@ -410,13 +411,13 @@ export async function getJobDetail(slug: string, ctx: UserContext & { profile?: 
     postalCode: job.postalCode,
     latitude: job.latitude,
     longitude: job.longitude,
-    sourceUrl: job.sourceUrl,
-    applicationUrl: job.applicationUrl,
+    sourceUrl: safeExternalUrl(job.sourceUrl),
+    applicationUrl: safeExternalUrl(job.applicationUrl),
     applicationEmail: job.applicationEmail,
     applicationLabel: job.applicationLabel,
     sourceName: job.sourceEntries[0]?.source.name ?? SOURCE_LABELS[job.source] ?? job.source,
-    sources: job.sourceEntries.map((e) => ({ key: e.source.key, name: e.source.name, url: e.url, applicationUrl: e.applicationUrl, isPrimary: e.isPrimary, status: e.status, lastVerifiedAt: e.lastVerifiedAt?.toISOString() ?? null })),
-    otherSources: job.duplicates.map((d) => ({ name: SOURCE_LABELS[d.source] ?? d.source, url: d.sourceUrl })),
+    sources: job.sourceEntries.map((e) => ({ key: e.source.key, name: e.source.name, url: safeExternalUrl(e.url), applicationUrl: safeExternalUrl(e.applicationUrl), isPrimary: e.isPrimary, status: e.status, lastVerifiedAt: e.lastVerifiedAt?.toISOString() ?? null })),
+    otherSources: job.duplicates.map((d) => ({ name: SOURCE_LABELS[d.source] ?? d.source, url: safeExternalUrl(d.sourceUrl) })),
     dataQualityScore: job.dataQualityScore,
     viewCount: job.viewCount,
     companyDetail: {

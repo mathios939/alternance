@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { REQUEST_PATH_HEADER, loginUrlFor, safeReturnTo } from "@/config/routes";
 import type { Plan, UserRole } from "@/generated/prisma/enums";
 
 export type SessionUser = {
@@ -40,10 +41,17 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
   };
 });
 
-/** Exige un utilisateur connecté, sinon redirige vers /login. */
+/** URL de connexion qui conserve le chemin demandé (posé par le proxy), sinon /login simple. */
+async function loginUrlForCurrentRequest(): Promise<string> {
+  const requested = (await headers()).get(REQUEST_PATH_HEADER);
+  const next = safeReturnTo(requested, { fallback: "" });
+  return next ? loginUrlFor(next) : "/login";
+}
+
+/** Exige un utilisateur connecté, sinon redirige vers /login en conservant la destination. */
 export async function requireUser(options?: { allowIncompleteOnboarding?: boolean }): Promise<SessionUser> {
   const user = await getSession();
-  if (!user) redirect("/login");
+  if (!user) redirect(await loginUrlForCurrentRequest());
   if (!options?.allowIncompleteOnboarding && !user.onboardingCompletedAt) {
     // Vérifie en base au cas où le cache cookie serait obsolète
     const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { onboardingCompletedAt: true } });

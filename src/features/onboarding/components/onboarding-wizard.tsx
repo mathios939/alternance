@@ -32,9 +32,9 @@ const STEPS = [
   { key: "skills", title: "Compétences", subtitle: "Pour un score précis", schema: profileSchema.pick({ skills: true }).extend({ skills: z.array(z.string()).min(1, "Ajoute au moins une compétence") }) },
 ] as const;
 
-type Props = { initial?: Partial<ProfileValues>; mode?: "onboarding" | "edit" };
+type Props = { initial?: Partial<ProfileValues>; mode?: "onboarding" | "edit"; /** Page ouverte une fois l'onboarding terminé (destination demandée avant l'inscription). */ redirectTo?: string };
 
-export function OnboardingWizard({ initial, mode = "onboarding" }: Props) {
+export function OnboardingWizard({ initial, mode = "onboarding", redirectTo = "/dashboard" }: Props) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [values, setValues] = useState<ProfileValues>({ ...DEFAULT_PROFILE_VALUES, ...initial });
@@ -78,9 +78,10 @@ export function OnboardingWizard({ initial, mode = "onboarding" }: Props) {
         return;
       }
       toast.success(mode === "onboarding" ? `Profil créé à ${result.data.completion} %. Bienvenue !` : "Profil mis à jour");
-      // Le profil du compte remplace le profil visiteur du navigateur.
+      // Le profil du compte est enregistré : le profil visiteur du navigateur n'a plus de raison d'être.
+      // (Jamais effacé avant : un refresh, un retour arrière ou un échec serveur le conservent.)
       if (mode === "onboarding") clearGuestProfile();
-      router.push(mode === "onboarding" ? "/dashboard" : "/settings/profile");
+      router.push(mode === "onboarding" ? redirectTo : "/settings/profile");
       router.refresh();
     });
   }

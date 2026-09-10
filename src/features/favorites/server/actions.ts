@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth/session";
 import { fail, ok, parseInput, runAction, type ActionResult } from "@/lib/action";
 import { trackActivity } from "@/features/activity/server/track";
+import { importFavoritesForUser, type ImportFavoritesResult } from "@/features/favorites/server/import";
 
 const toggleSchema = z
   .object({
@@ -63,37 +64,18 @@ export type ImportGuestFavoritesInput = z.input<typeof importSchema>;
 
 /**
  * Importe dans le compte les favoris sauvegardés sans compte (identifiants conservés par le navigateur).
- * Les identifiants inconnus ou déjà présents sont ignorés ; rien n'est supprimé.
+ * Idempotent (voir importFavoritesForUser) : les identifiants inconnus ou déjà présents sont ignorés,
+ * rien n'est supprimé. Le navigateur n'efface ses favoris locaux qu'après cette réponse.
  */
-export async function importGuestFavorites(input: ImportGuestFavoritesInput): Promise<ActionResult<{ imported: number }>> {
+export async function importGuestFavorites(input: ImportGuestFavoritesInput): Promise<ActionResult<ImportFavoritesResult>> {
   return runAction("importGuestFavorites", async () => {
     const userId = await requireUserId();
     const parsed = parseInput(importSchema, input);
     if (!parsed.ok) return parsed.result;
-    const { jobIds, companyIds } = parsed.data;
-    const [jobs, companies, existing] = await Promise.all([
-      jobIds.length ? prisma.job.findMany({ where: { id: { in: jobIds } }, select: { id: true, title: true, companyId: true } }) : [],
-      companyIds.length ? prisma.company.findMany({ where: { id: { in: companyIds }, isPlaceholder: false }, select: { id: true, name: true } }) : [],
-      prisma.favorite.findMany({ where: { userId, OR: [{ jobId: { in: jobIds } }, { companyId: { in: companyIds } }] }, select: { jobId: true, companyId: true } }),
-    ]);
-    const hasJob = new Set(existing.map((f) => f.jobId).filter(Boolean));
-    const hasCompany = new Set(existing.map((f) => f.companyId).filter(Boolean));
-    let imported = 0;
-    for (const job of jobs) {
-      if (hasJob.has(job.id)) continue;
-      await prisma.favorite.create({ data: { userId, jobId: job.id, collection: "TO_APPLY" } });
-      await trackActivity({ userId, type: "JOB_SAVED", title: `Offre sauvegardée : ${job.title}`, jobId: job.id, companyId: job.companyId });
-      imported++;
-    }
-    for (const company of companies) {
-      if (hasCompany.has(company.id)) continue;
-      await prisma.favorite.create({ data: { userId, companyId: company.id, collection: "COMPANIES" } });
-      await trackActivity({ userId, type: "JOB_SAVED", title: `Entreprise sauvegardée : ${company.name}`, companyId: company.id });
-      imported++;
-    }
+    const result = await importFavoritesForUser(userId, parsed.data);
     revalidatePath("/favorites");
     revalidatePath("/dashboard");
-    return ok({ imported });
+    return ok(result);
   });
 }
 

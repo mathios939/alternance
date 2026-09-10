@@ -4,6 +4,9 @@ const baseURL = process.env["E2E_BASE_URL"] ?? "http://localhost:3000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Fixtures déterministes (offre réelle du parcours visiteur) et purge des données e2e : voir tests/e2e/fixtures.ts
+  globalSetup: "./tests/e2e/global-setup.ts",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   timeout: 120_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

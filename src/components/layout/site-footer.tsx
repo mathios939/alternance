@@ -9,6 +9,9 @@ const COLUMNS = [
     links: [
       { label: "Offres d'alternance", href: "/jobs" },
       { label: "Entreprises", href: "/companies" },
+      { label: "Opportunity Radar", href: "/radar" },
+      { label: "Carte", href: "/map" },
+      { label: "D'où viennent les données", href: "/sources" },
       { label: "Fonctionnalités", href: "/#fonctionnalites" },
       { label: "Tarifs", href: "/tarifs" },
     ],

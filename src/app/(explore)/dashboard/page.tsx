@@ -113,7 +113,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             {topMatches.map((job) => (
-              <JobCard key={job.id} job={job} variant="large" />
+              <JobCard key={job.id} job={job} variant="large" isAuthenticated />
             ))}
           </div>
         )}
@@ -126,7 +126,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {radarCompanies.map((c) => (
-              <CompanyCard key={c.id} company={c} variant="compact" />
+              <CompanyCard key={c.id} company={c} variant="compact" isAuthenticated />
             ))}
           </div>
         )}

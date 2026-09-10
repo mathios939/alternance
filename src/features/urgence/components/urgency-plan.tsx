@@ -47,11 +47,11 @@ export function UrgencyPlan({ today, week }: Props) {
       </section>
       <section>
         <div className="flex items-end justify-between"><h3 className="font-semibold">Offres du jour</h3><Button asChild variant="link"><Link href="/jobs?sort=match&minMatch=70">Toutes <ArrowRight /></Link></Button></div>
-        <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{today.jobs.map((j) => <JobCard key={j.id} job={j} />)}</div>
+        <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{today.jobs.map((j) => <JobCard key={j.id} job={j} isAuthenticated />)}</div>
       </section>
       <section>
         <div className="flex items-end justify-between"><h3 className="font-semibold">Entreprises à contacter</h3><Button asChild variant="link"><Link href="/radar">Radar complet <ArrowRight /></Link></Button></div>
-        <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">{today.companies.map((c) => <CompanyCard key={c.id} company={c} variant="compact" />)}</div>
+        <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">{today.companies.map((c) => <CompanyCard key={c.id} company={c} variant="compact" isAuthenticated />)}</div>
       </section>
       {today.followUps.length ? (
         <section className="surface p-5">

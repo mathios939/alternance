@@ -55,7 +55,7 @@ function FavoriteItem({ entry }: { entry: FavoriteEntry }) {
 
   return (
     <div className="space-y-2">
-      {entry.job ? <JobCard job={entry.job} /> : entry.company ? <CompanyCard company={entry.company} /> : null}
+      {entry.job ? <JobCard job={entry.job} isAuthenticated /> : entry.company ? <CompanyCard company={entry.company} isAuthenticated /> : null}
       <div className="flex flex-wrap items-center gap-2 px-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -24,6 +24,7 @@ import { DataBadge } from "@/components/shared/data-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeading } from "@/components/shared/section-heading";
 import { formatDistanceKm } from "@/lib/format";
+import { safeExternalUrl } from "@/lib/external-url";
 
 export async function generateMetadata(props: PageProps<"/companies/[slug]">): Promise<Metadata> {
   const { slug } = await props.params;
@@ -62,6 +63,8 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
   const recommendation = recommendBestContact(company, { jobFamily: candidate?.jobFamily ?? null }, company.contacts);
   const roleFallback = recommendation ? null : recommendContactRole(company, { jobFamily: candidate?.jobFamily ?? null }, { postingUrl: company.jobs[0]?.applicationUrl ?? null });
   const sector = SECTORS[company.sector as SectorKey];
+  const website = safeExternalUrl(company.website);
+  const careersUrl = safeExternalUrl(company.careersUrl);
   const angle = buildAngle(company, candidate ? { targetJobTitle: candidate.targetJobTitle, skills: candidate.skills } : null);
 
   return (
@@ -89,14 +92,14 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
             {company.description ? <p className="mt-4 max-w-3xl text-[15px] leading-relaxed">{company.description}</p> : null}
             <CompanyProvenance company={{ isDemo: company.isDemo, dataOrigin: company.dataOrigin, siren: company.siren, nafLabel: company.nafLabel, dataSources: card.dataSources, lastVerifiedAt: card.lastVerifiedAt }} />
             <div className="mt-4 flex flex-wrap gap-2">
-              {company.website ? (
+              {website ? (
                 <Button asChild variant="outline" size="sm">
-                  <a href={company.website} target="_blank" rel="noopener noreferrer"><Globe /> Site web <ExternalLink /></a>
+                  <a href={website} target="_blank" rel="noopener noreferrer"><Globe /> Site web <ExternalLink /></a>
                 </Button>
               ) : null}
-              {company.careersUrl ? (
+              {careersUrl ? (
                 <Button asChild variant="outline" size="sm">
-                  <a href={company.careersUrl} target="_blank" rel="noopener noreferrer"><Briefcase /> Page carrières <ExternalLink /></a>
+                  <a href={careersUrl} target="_blank" rel="noopener noreferrer"><Briefcase /> Page carrières <ExternalLink /></a>
                 </Button>
               ) : null}
               <ReportDialog target={{ companyId: company.id }} kind="company" />

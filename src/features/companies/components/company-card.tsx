@@ -16,10 +16,10 @@ import { useGuestFavorites } from "@/lib/guest/use-guest-favorites";
 import { CompanyLogo } from "@/features/jobs/components/job-card";
 import { OpportunityScoreBadge } from "./opportunity-score";
 
-type Props = { company: CompanyCardData & { nearestCity?: string }; variant?: "default" | "compact"; isAuthenticated?: boolean; className?: string };
+type Props = { company: CompanyCardData & { nearestCity?: string }; variant?: "default" | "compact"; /** Obligatoire : favoris du compte ou du navigateur. */ isAuthenticated: boolean; className?: string };
 
 /** Carte d'entreprise. Sans compte, « Suivre » sauvegarde dans le navigateur. */
-export function CompanyCard({ company, variant = "default", isAuthenticated = true, className }: Props) {
+export function CompanyCard({ company, variant = "default", isAuthenticated, className }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [optimisticFavorite, setFavorite] = useOptimistic(company.isFavorite);

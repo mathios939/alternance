@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { closeDb, createVisitorFixture, deleteVisitorFixture, type VisitorFixture } from "./helpers";
+import { VISITOR_FIXTURE as fixture } from "./fixtures";
 
 /**
  * Parcours VISITEUR (sans compte) — joué sur desktop et sur mobile :
@@ -9,17 +9,6 @@ import { closeDb, createVisitorFixture, deleteVisitorFixture, type VisitorFixtur
  * À aucun moment un écran de connexion ne doit bloquer le parcours.
  */
 test.describe.configure({ mode: "serial" });
-
-let fixture: VisitorFixture | undefined;
-
-test.beforeAll(async () => {
-  fixture = await createVisitorFixture();
-});
-
-test.afterAll(async () => {
-  await deleteVisitorFixture(fixture);
-  await closeDb();
-});
 
 async function expectToast(page: Page, text: RegExp | string) {
   await expect(page.getByRole("region", { name: /notifications/i }).getByText(text).first()).toBeVisible({ timeout: 15_000 });
@@ -121,14 +110,14 @@ test("un visiteur cherche, consulte, personnalise, sauvegarde et candidate sans 
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Carte");
 
   // 12. Candidater sans compte : le bouton ouvre la destination officielle
-  await page.goto(`/jobs/${fixture!.jobSlug}`);
+  await page.goto(`/jobs/${fixture.jobSlug}`);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("parcours visiteur");
   const apply = page.getByRole("link", { name: /Candidater sur le site officiel/ }).first();
-  await expect(apply).toHaveAttribute("href", fixture!.applicationUrl);
+  await expect(apply).toHaveAttribute("href", fixture.applicationUrl);
   await expect(apply).toHaveAttribute("target", "_blank");
   const [popup] = await Promise.all([page.waitForEvent("popup"), apply.click()]);
   await popup.close();
-  await expect(page).toHaveURL(new RegExp(`/jobs/${fixture!.jobSlug}`));
+  await expect(page).toHaveURL(new RegExp(`/jobs/${fixture.jobSlug}`));
   // Le suivi est proposé comme un avantage du compte, jamais imposé
   await page.getByRole("button", { name: "Suivre cette candidature" }).first().click();
   const prompt = page.getByRole("dialog", { name: /Crée un compte gratuitement pour sauvegarder et suivre cette candidature/ });

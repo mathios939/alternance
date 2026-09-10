@@ -14,23 +14,32 @@ function readCookie(): string | null {
   return entry ? decodeCookieValue(entry.slice(prefix.length)) : null;
 }
 
-/** Lecture côté navigateur : cookie d'abord (source lue par le serveur), localStorage en secours. */
+function writeCookie(value: string | null) {
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = value === null ? `${GUEST_PROFILE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}` : `${GUEST_PROFILE_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${GUEST_PROFILE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+}
+
+/**
+ * Lecture côté navigateur. Le cookie est la source lue par le serveur ; localStorage n'est qu'un miroir.
+ * Un miroir valide sans cookie (cookie effacé ou expiré côté navigateur) réécrit le cookie ;
+ * un miroir expiré ou corrompu est supprimé pour que client et serveur restent cohérents.
+ */
 export function readGuestProfile(): GuestProfile | null {
   try {
-    let raw = readCookie();
-    if (!raw) raw = localStorage.getItem(GUEST_PROFILE_STORAGE_KEY);
+    const fromCookie = readCookie();
+    const fromStorage = fromCookie ? null : localStorage.getItem(GUEST_PROFILE_STORAGE_KEY);
+    const raw = fromCookie ?? fromStorage;
     if (raw === cachedRaw) return cachedProfile;
     cachedRaw = raw;
     cachedProfile = parseGuestProfile(raw);
+    if (fromStorage) {
+      if (cachedProfile) writeCookie(fromStorage);
+      else localStorage.removeItem(GUEST_PROFILE_STORAGE_KEY);
+    }
     return cachedProfile;
   } catch {
     return null;
   }
-}
-
-function writeCookie(value: string | null) {
-  const secure = location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = value === null ? `${GUEST_PROFILE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}` : `${GUEST_PROFILE_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${GUEST_PROFILE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
 }
 
 export function saveGuestProfile(profile: GuestProfile): void {

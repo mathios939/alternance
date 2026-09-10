@@ -25,7 +25,8 @@ type Props = {
   variant?: "default" | "compact" | "large";
   selected?: boolean;
   onSelect?: (job: JobCardData) => void;
-  isAuthenticated?: boolean;
+  /** Obligatoire : décide entre favoris du compte et favoris du navigateur, et entre suivi et lien officiel. */
+  isAuthenticated: boolean;
   className?: string;
 };
 
@@ -46,7 +47,7 @@ export function CompanyLogo({ name, logoUrl, size = "md", className }: { name: s
  * Carte d'offre. Sans compte : sauvegarde dans le navigateur et candidature via le lien officiel ;
  * le suivi de candidature (Kanban) est proposé comme avantage du compte, jamais imposé.
  */
-export function JobCard({ job, variant = "default", selected = false, onSelect, isAuthenticated = true, className }: Props) {
+export function JobCard({ job, variant = "default", selected = false, onSelect, isAuthenticated, className }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [optimistic, setOptimistic] = useOptimistic({ isFavorite: job.isFavorite, applicationStatus: job.applicationStatus });
