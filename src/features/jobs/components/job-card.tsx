@@ -174,7 +174,7 @@ export function JobCard({
         <div className="min-w-0 flex-1">
           <h3
             className={cn(
-              "leading-snug font-semibold text-balance",
+              "leading-snug font-semibold text-balance [overflow-wrap:anywhere]",
               isLarge ? "text-lg" : "text-[15px]",
               "line-clamp-2",
             )}
