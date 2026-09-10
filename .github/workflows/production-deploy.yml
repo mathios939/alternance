@@ -76,7 +76,10 @@ jobs:
           echo "::add-mask::$PROJECT_ID"
           echo "org_id=$ORG_ID" >> "$GITHUB_OUTPUT"
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
-          DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains?teamId=$ORG_ID" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);const list=(j.domains||[]).map(x=>x.name);console.log(list.find(n=>n.endsWith(".vercel.app"))||list[0]||"")})')
+          pick() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const j=JSON.parse(d);const list=(j.domains||[]).map(x=>x.name);console.log(list.find(n=>n.endsWith(".vercel.app"))||list[0]||"")}catch{console.log("")}})'; }
+          # Compte personnel (orgId = identifiant utilisateur) ou équipe : on tente sans puis avec teamId.
+          DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains" | pick)
+          if [ -z "$DOMAIN" ]; then DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains?teamId=$ORG_ID" | pick); fi
           if [ -z "$DOMAIN" ]; then DOMAIN="$PROJECT.vercel.app"; fi
           echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
           echo "Domaine de production : https://$DOMAIN"
