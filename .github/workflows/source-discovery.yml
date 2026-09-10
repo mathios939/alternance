@@ -85,9 +85,16 @@ jobs:
                 const s=JSON.parse(require("fs").readFileSync("openapi.json","utf8"));
                 const p=s.paths["/api/job/v1/search"]||s.paths["/job/v1/search"];
                 if(!p) process.exit(0);
-                const schema=(((p.get||{}).responses||{})["200"]||{}).content;
-                console.log("\n### Schéma de réponse /job/v1/search (tronqué)\n");
-                console.log("```json\n"+JSON.stringify(schema,null,1).slice(0,6000)+"\n```");
+                const get=p.get||{};
+                console.log("\n### Route /job/v1/search\n");
+                console.log("- description : "+String(get.description||"").replace(/\s+/g," ").slice(0,2500));
+                console.log("- paramètres : "+JSON.stringify((get.parameters||[]).map(x=>({name:x.name,required:x.required,schema:x.schema,description:String(x.description||"").slice(0,200)}))).slice(0,4000));
+                const comp=(s.components&&s.components.schemas)||{};
+                for(const name of ["JobOfferRead","JobOfferExport","JobRecruiter","JobOfferWorkplace","JobOfferApply","JobOfferContract","JobOfferOffer","JobOfferIdentifier"]){
+                  if(comp[name]) console.log("\n### Schéma "+name+"\n```json\n"+JSON.stringify(comp[name],null,0).slice(0,9000)+"\n```");
+                }
+                const names=Object.keys(comp);
+                console.log("\n- schémas disponibles ("+names.length+") : "+names.join(", ").slice(0,3000));
               ' >> table.md 2>/dev/null || true
               break
             fi
