@@ -7,27 +7,74 @@ import { expect, test, type Page } from "@playwright/test";
  * rechargement → personnalisation conservée après rechargement → entreprise → Radar → carte →
  * /dashboard expliqué → santé. Ne crée rien côté serveur ; ne modifie aucune donnée.
  */
-const PUBLIC_PAGES = ["/", "/jobs", "/companies", "/radar", "/map", "/compare", "/favorites", "/dashboard", "/sources"] as const;
+const PUBLIC_PAGES = [
+  "/",
+  "/jobs",
+  "/companies",
+  "/radar",
+  "/map",
+  "/compare",
+  "/favorites",
+  "/dashboard",
+  "/sources",
+] as const;
 
 async function acceptCookies(page: Page) {
   const banner = page.getByRole("dialog", { name: "Information sur les cookies" });
-  if (await banner.isVisible().catch(() => false)) await banner.getByRole("button", { name: "Compris" }).click();
+  if (await banner.isVisible().catch(() => false))
+    await banner.getByRole("button", { name: "Compris" }).click({ timeout: 10_000 });
 }
 
 async function expectToast(page: Page, text: RegExp | string) {
-  await expect(page.getByRole("region", { name: /notifications/i }).getByText(text).first()).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page
+      .getByRole("region", { name: /notifications/i })
+      .getByText(text)
+      .first(),
+  ).toBeVisible({ timeout: 15_000 });
 }
 
 test.describe.configure({ mode: "serial" });
 
-test("les pages publiques répondent en 200 sans redirection vers la connexion", async ({ request }) => {
+/**
+ * Le bandeau cookies est mémorisé dans localStorage : il est accepté AVANT la navigation pour que le
+ * parcours ne dépende pas d'un clic sur un bandeau flottant (son fonctionnement est couvert par les
+ * tests e2e locaux). Le débordement horizontal, lui, est vérifié explicitement sur mobile.
+ */
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem(
+        "aos.cookie-consent",
+        JSON.stringify({ value: "essential", at: new Date().toISOString() }),
+      );
+    } catch {}
+  });
+});
+
+async function expectNoHorizontalOverflow(page: Page, label: string) {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, `débordement horizontal sur ${label} (${overflow}px)`).toBeLessThanOrEqual(1);
+}
+
+test("les pages publiques répondent en 200 sans redirection vers la connexion", async ({
+  request,
+}) => {
   for (const path of PUBLIC_PAGES) {
     const res = await request.get(path, { maxRedirects: 0 });
     expect(res.status(), path).toBe(200);
   }
   const health = await request.get("/api/health");
   expect(health.status()).toBe(200);
-  const body = (await health.json()) as { app: string; database: string; demoMode: boolean; services: Record<string, string>; data: { realActiveJobs: number; companies: number } | null };
+  const body = (await health.json()) as {
+    app: string;
+    database: string;
+    demoMode: boolean;
+    services: Record<string, string>;
+    data: { realActiveJobs: number; companies: number } | null;
+  };
   expect(body.app).toBe("healthy");
   expect(body.database).toBe("healthy");
   expect(body.demoMode).toBe(false);
@@ -41,17 +88,22 @@ test("les pages publiques répondent en 200 sans redirection vers la connexion",
   expect(priv.headers()["location"]).toMatch(/\/login\?next=%2Fapplications/);
 });
 
-test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et candidate sans compte", async ({ page, isMobile }) => {
+test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et candidate sans compte", async ({
+  page,
+  isMobile,
+}) => {
   test.setTimeout(300_000);
   const loginWalls: string[] = [];
   page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame() && /\/(login|register)(\?|$)/.test(frame.url())) loginWalls.push(frame.url());
+    if (frame === page.mainFrame() && /\/(login|register)(\?|$)/.test(frame.url()))
+      loginWalls.push(frame.url());
   });
 
   // 1. Accueil et recherche « développeur » à Nantes (30 km)
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Trouve ton alternance");
   await acceptCookies(page);
+  if (isMobile) await expectNoHorizontalOverflow(page, "l'accueil");
   const search = page.getByRole("search", { name: "Rechercher une alternance" }).first();
   await search.getByPlaceholder("Métier, formation ou compétence").fill("développeur");
   await search.getByPlaceholder("Ville").fill("Nantes");
@@ -65,17 +117,23 @@ test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et
   const exactCount = await results.count();
   expect(exactCount > 0 || (await empty.isVisible())).toBe(true);
   await expect(page.getByText("Démo", { exact: true })).toHaveCount(0);
+  if (isMobile) await expectNoHorizontalOverflow(page, "la recherche");
 
   // 2. Une vraie offre d'alternance autour de Nantes (toutes offres du rayon si le mot-clé n'en donne pas)
   if (exactCount === 0) await page.goto("/jobs?city=Nantes&radius=30");
   const firstCard = page.getByRole("button", { name: /chez/ }).first();
   await expect(firstCard).toBeVisible({ timeout: 60_000 });
   await firstCard.click();
-  const pane = isMobile ? page.getByRole("dialog", { name: "Détail de l'offre" }) : page.getByRole("complementary", { name: "Détail de l'offre" });
+  const pane = isMobile
+    ? page.getByRole("dialog", { name: "Détail de l'offre" })
+    : page.getByRole("complementary", { name: "Détail de l'offre" });
   await expect(pane.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
   const provenance = pane.getByRole("region", { name: "Provenance des données" });
   await expect(provenance).toContainText("France Travail");
-  await expect(provenance.getByRole("link", { name: /annonce d'origine/ })).toHaveAttribute("href", /^https?:\/\//);
+  await expect(provenance.getByRole("link", { name: /annonce d'origine/ })).toHaveAttribute(
+    "href",
+    /^https?:\/\//,
+  );
   await expect(pane.getByText("Démo", { exact: true })).toHaveCount(0);
   const title = (await pane.getByRole("heading", { level: 1 }).textContent())?.trim() ?? "";
   expect(title.length).toBeGreaterThan(3);
@@ -85,7 +143,9 @@ test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et
   await expectToast(page, /Sauvegardée dans ce navigateur/);
   await page.reload();
   await page.goto("/favorites");
-  await expect(page.getByRole("heading", { level: 3, name: title }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { level: 3, name: title }).first()).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.getByText("Sauvegardés dans ce navigateur uniquement.")).toBeVisible();
 
   // 4. Personnalisation sans compte, conservée après rechargement → Match Score sur les offres
@@ -101,10 +161,16 @@ test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et
   await skills.press("Enter");
   await dialog.getByRole("button", { name: /Voir mes résultats personnalisés/ }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("img", { name: /Score de compatibilité/ }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("img", { name: /Score de compatibilité/ }).first()).toBeVisible({
+    timeout: 30_000,
+  });
   await page.reload();
-  await expect(page.getByRole("button", { name: "Résultats personnalisés" }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("img", { name: /Score de compatibilité/ }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Résultats personnalisés" }).first()).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("img", { name: /Score de compatibilité/ }).first()).toBeVisible({
+    timeout: 30_000,
+  });
   const guestCookie = (await page.context().cookies()).find((c) => c.name === "aos_guest_profile");
   expect(guestCookie).toBeDefined();
   expect(guestCookie!.expires - Date.now() / 1000).toBeGreaterThan(80 * 86_400);
@@ -112,12 +178,17 @@ test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et
 
   // 5. Fiche offre en pleine page : lien de candidature officiel sans compte, badge REAL
   await page.getByRole("button", { name: /chez/ }).first().click();
-  const pane2 = isMobile ? page.getByRole("dialog", { name: "Détail de l'offre" }) : page.getByRole("complementary", { name: "Détail de l'offre" });
+  const pane2 = isMobile
+    ? page.getByRole("dialog", { name: "Détail de l'offre" })
+    : page.getByRole("complementary", { name: "Détail de l'offre" });
   await expect(pane2.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
   const fullPage = isMobile ? null : pane2.getByRole("link", { name: /Ouvrir en pleine page/ });
   if (fullPage) await fullPage.click();
   else {
-    const href = await pane2.getByRole("link", { name: /Candidater sur le site officiel/ }).first().getAttribute("href");
+    const href = await pane2
+      .getByRole("link", { name: /Candidater sur le site officiel/ })
+      .first()
+      .getAttribute("href");
     expect(href).toMatch(/^https?:\/\//);
     await pane2.getByRole("button", { name: /Retour aux résultats/ }).click();
     const slugLink = page.getByRole("link", { name: "Voir l'offre" }).first();
@@ -142,7 +213,9 @@ test("un visiteur cherche, ouvre une vraie offre, la sauvegarde, personnalise et
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByText("Démo", { exact: true })).toHaveCount(0);
   await page.goto("/radar");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/entreprise/i, { timeout: 30_000 });
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/entreprise/i, {
+    timeout: 30_000,
+  });
   await page.goto("/map");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Carte");
   await page.goto("/dashboard");
