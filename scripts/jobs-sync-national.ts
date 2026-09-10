@@ -170,19 +170,21 @@ runMain(async () => {
     }
     ok(`${refreshed} recherche(s) rafraîchie(s) sur ${searches.length} candidate(s)`);
 
-    // Priorité 4 : rattrapage progressif du reste du catalogue (fenêtre 31 j), territoires les plus anciens d'abord.
-    heading("Priorité 4 — rattrapage du catalogue (fenêtre 31 j)");
+    // Priorité 4 : rattrapage progressif du reste du catalogue (fenêtre --backfill-window, 90 j par
+    // défaut, même fenêtre que le rattrapage initial), territoires les plus anciens d'abord.
+    const backfillWindow = (str(args["backfill-window"]) ?? "90d") as SyncWindow;
+    heading(`Priorité 4 — rattrapage du catalogue (fenêtre ${backfillWindow})`);
     const budget = num(args["backfill-budget"]) ?? 12;
     const stale = await staleTerritories(
       provider.key,
-      "31d",
+      backfillWindow,
       planTerritories({ all: true }),
       budget,
     );
     const p4 = await runNationalSync({
       provider,
       territories: stale,
-      window: "31d",
+      window: backfillWindow,
       trigger,
       workerId,
       priority: "backfill",
@@ -196,6 +198,30 @@ runMain(async () => {
     const territories = planTerritories(
       scope ?? { departments, regions, all: !departments?.length && !regions?.length },
     );
+    // Pendant un long rattrapage, les nouveautés ne doivent pas attendre des heures : toutes les
+    // --interleave-recent-minutes (45 par défaut), un passage « fenêtre 1 j » France entière est intercalé.
+    const interleaveMinutes = num(args["interleave-recent-minutes"]) ?? 45;
+    let lastRecentPass = Date.now();
+    const beforeTerritory = async () => {
+      if (interleaveMinutes <= 0 || Date.now() - lastRecentPass < interleaveMinutes * 60_000) return;
+      if (remainingMinutes() < 5) return;
+      heading("Nouveautés intercalées (France entière, fenêtre 1 j)");
+      const recent = await runNationalSync({
+        provider,
+        territories: planTerritories({ all: true }),
+        window: "1d",
+        trigger: `${trigger}:recent`,
+        workerId,
+        priority: "recent",
+        maxMinutes: Math.min(remainingMinutes(), 20),
+        maxAgeHours: 1.5,
+        onTerritory: (r) => {
+          if (r.status !== "fresh") line(r);
+        },
+      });
+      summarize("Nouveautés intercalées", recent);
+      lastRecentPass = Date.now();
+    };
     heading(
       `Rattrapage — ${territories.length} territoire(s), fenêtre ${window}, budget ${maxMinutes} min, ordre : ${territories.slice(0, 12).join(" ")}${territories.length > 12 ? " …" : ""}`,
     );
@@ -209,6 +235,7 @@ runMain(async () => {
       maxMinutes,
       maxAgeHours: args["force"] ? undefined : maxAgeHours,
       onTerritory: line,
+      beforeTerritory,
     });
     summarize("Rattrapage", report);
   }
@@ -217,9 +244,9 @@ runMain(async () => {
   const usage = await recentQuotaUsage(provider.key, 60);
   const stats = getQuotaManager(provider.key).stats();
   info(
-    `${usage.requests} requêtes sur 60 min (pic ${usage.peakPerMinute}/min, plafond ${stats.perMinuteLimit}/min) · débit ${stats.maxPerSecond}/s · concurrence ${stats.maxConcurrency} · 429 : ${stats.rateLimited} · attente cumulée ${(stats.waitedMs / 1000).toFixed(0)} s`,
+    `${usage.requests} requêtes sur 60 min (pic ${usage.peakPerMinute}/min, plafond ${stats.perMinuteLimit}/min) · débit ${stats.maxPerSecond}/s · concurrence ${stats.maxConcurrency} · 429 : ${usage.rateLimited} · erreurs API : ${usage.errors} · attente cumulée ${(stats.waitedMs / 1000).toFixed(0)} s`,
   );
-  await purgeQuotaCounters(24);
+  await purgeQuotaCounters();
 
   heading("Couverture réelle");
   console.log(

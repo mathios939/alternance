@@ -40,6 +40,17 @@ jobs:
           probe "Ancienne API v1 LBA SANS clé (jobsEtFormations)" "https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/jobsEtFormations?caller=alternance-os&romes=M1805&latitude=47.2184&longitude=-1.5536&radius=30"
           probe "Ancienne API v1 LBA SANS clé (jobs)" "https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/jobs?caller=alternance-os&romes=M1805&latitude=47.2184&longitude=-1.5536&radius=30"
           probe "CGU / licence (page documentation)" "https://api.apprentissage.beta.gouv.fr/documentation"
+          probe "OpenAPI (…/api/documentation/json)" "https://api.apprentissage.beta.gouv.fr/api/documentation/json"
+          probe "OpenAPI (…/api/documentation)" "https://api.apprentissage.beta.gouv.fr/api/documentation"
+          probe "OpenAPI (…/documentation/openapi.json)" "https://api.apprentissage.beta.gouv.fr/documentation/openapi.json"
+          probe "OpenAPI (…/api/v1/openapi.json)" "https://api.apprentissage.beta.gouv.fr/api/v1/openapi.json"
+          probe "OpenAPI (…/openapi.json)" "https://api.apprentissage.beta.gouv.fr/openapi.json"
+          # Liens vers une spécification ou des conditions d'utilisation dans la page de documentation
+          curl -sS --max-time 30 "https://api.apprentissage.beta.gouv.fr/documentation" -o doc.html || true
+          echo "" >> table.md
+          echo "Liens repérés dans la page de documentation :" >> table.md
+          grep -oE '(href|src)="[^"]*(openapi|swagger|json|cgu|licen|conditions|usage|terms)[^"]*"' doc.html | sort -u | head -40 | sed 's/^/- /' >> table.md || true
+          grep -oiE 'licen[cs]e[^<]{0,120}|etalab[^<]{0,80}|conditions[^<]{0,120}' doc.html | sort -u | head -20 | sed 's/^/- texte : /' >> table.md || true
           if [ -n "$LBA_KEY" ]; then
             probe "Recherche offres v1 AVEC clé (Nantes, 30 km)" "https://api.apprentissage.beta.gouv.fr/api/job/v1/search?latitude=47.2184&longitude=-1.5536&radius=30" "Authorization: Bearer $LBA_KEY"
             probe "Export offres v1 AVEC clé" "https://api.apprentissage.beta.gouv.fr/api/job/v1/export" "Authorization: Bearer $LBA_KEY"
@@ -49,7 +60,7 @@ jobs:
             echo "Clé LA_BONNE_ALTERNANCE_API_KEY : absente (GitHub → Settings → Secrets and variables → Actions)" >> table.md
           fi
           # Chemins et sécurité déclarés par l'OpenAPI, si joignable
-          for u in "https://api.apprentissage.beta.gouv.fr/api/openapi.json" "https://api.apprentissage.beta.gouv.fr/documentation/json"; do
+          for u in "https://api.apprentissage.beta.gouv.fr/api/documentation/json" "https://api.apprentissage.beta.gouv.fr/documentation/openapi.json" "https://api.apprentissage.beta.gouv.fr/openapi.json" "https://api.apprentissage.beta.gouv.fr/api/v1/openapi.json" $(grep -oE 'href="[^"]*(openapi|swagger)[^"]*"' doc.html | sed -E 's/href="([^"]*)"/\1/' | sed -E 's#^/#https://api.apprentissage.beta.gouv.fr/#' | sort -u | head -5); do
             if curl -sS --max-time 30 -H "accept: application/json" "$u" -o openapi.json && node -e 'JSON.parse(require("fs").readFileSync("openapi.json","utf8"))' 2>/dev/null; then
               echo "" >> table.md
               echo "### OpenAPI ($u)" >> table.md
