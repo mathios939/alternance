@@ -142,4 +142,6 @@ jobs:
           sed 's/\x1b\[[0-9;]*m//g' report.log >> "$GITHUB_STEP_SUMMARY"
           printf '```\n\n### Couverture réelle\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
           npm run db:coverage | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '```\n\n### Contrôle qualité\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:quality | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"
