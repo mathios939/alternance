@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { departmentCodeFromPostal } from "@/config/departments";
 import { createLogger } from "@/lib/logger";
 import { EMPLOYEE_RANGES } from "../naf";
 import type { CompanyDataProvider, CompanyProviderCapabilities, CompanyProviderStatus, CompanyRecord, CompanySearchPage, CompanySearchParams } from "../types";
@@ -52,8 +53,24 @@ const siegeSchema = z.looseObject({
   etat_administratif: str,
 });
 
+/** Établissement renvoyé dans `matching_etablissements` : celui qui a satisfait le filtre géographique. */
+const etablissementSchema = z.looseObject({
+  siret: str,
+  adresse: str,
+  code_postal: str,
+  libelle_commune: str,
+  commune: str,
+  departement: str,
+  latitude: numStr,
+  longitude: numStr,
+  activite_principale: str,
+  etat_administratif: str,
+  est_siege: z.boolean().nullish(),
+});
+
 export const rechercheEntrepriseSchema = z.looseObject({
   siren: z.string(),
+  matching_etablissements: z.array(etablissementSchema).nullish(),
   nom_complet: str,
   nom_raison_sociale: str,
   sigle: str,
@@ -119,6 +136,20 @@ export function mapRechercheEntreprise(r: RechercheEntreprise): CompanyRecord {
     category: r.categorie_entreprise ?? null,
     website: null,
     sourceUrl: `https://annuaire-entreprises.data.gouv.fr/entreprise/${r.siren}`,
+    // Établissements ayant satisfait le filtre géographique (le siège peut être ailleurs en France).
+    establishments: (r.matching_etablissements ?? [])
+      .filter((e) => (e.etat_administratif ?? "A") === "A" && e.siret)
+      .map((e) => ({
+        siret: e.siret!,
+        address: e.adresse ?? null,
+        city: titleCase(e.libelle_commune),
+        postalCode: e.code_postal ?? null,
+        inseeCode: e.commune ?? null,
+        departmentCode: e.departement ?? departmentCodeFromPostal(e.code_postal),
+        latitude: toNumber(e.latitude),
+        longitude: toNumber(e.longitude),
+        isHeadquarters: e.est_siege === true || (Boolean(siege?.siret) && e.siret === siege?.siret),
+      })),
     raw: r,
   };
 }

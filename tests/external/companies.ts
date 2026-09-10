@@ -37,10 +37,17 @@ void runExternalTest("API Recherche d'entreprises", "companies", async (ctx) => 
     if (!/^\d{9}$/.test(first.siren) || !first.legalName) invalidResponse("Fiche sans SIREN valide ou sans raison sociale");
     if (!isHttpUrl(first.sourceUrl)) invalidResponse("URL de source invalide");
     const withCoords = page.results.filter((r) => r.latitude !== null).length;
+    // Le filtre département porte sur les établissements : le siège peut être ailleurs.
+    const localSites = page.results.filter((r) => r.establishments.some((e) => e.departmentCode === department)).length;
     ctx.detail("geolocated", `${withCoords}/${page.results.length}`);
-    for (const r of page.results) ctx.info(`${r.siren} · ${(r.brandName ?? r.legalName).slice(0, 50)} · ${r.city ?? "?"} (${r.postalCode ?? "?"}) · NAF ${r.nafCode ?? "?"} · effectif ${r.employeeRangeLabel ?? "non renseigné"}`);
+    ctx.detail("localEstablishments", `${localSites}/${page.results.length}`);
+    for (const r of page.results) {
+      const local = r.establishments.find((e) => e.departmentCode === department);
+      ctx.info(`${r.siren} · ${(r.brandName ?? r.legalName).slice(0, 50)} · siège ${r.city ?? "?"} (${r.postalCode ?? "?"})${local ? ` · établissement ${local.city ?? "?"} (${local.postalCode ?? "?"})${local.latitude !== null ? ", géolocalisé" : ""}` : " · aucun établissement local renvoyé"} · NAF ${r.nafCode ?? "?"} · effectif ${r.employeeRangeLabel ?? "non renseigné"}`);
+    }
+    if (localSites === 0) ctx.warn(`Aucune fiche ne renvoie d'établissement dans le département ${department} : le champ matching_etablissements est peut-être absent de la réponse.`);
     siren = first.siren;
-    return `${page.results.length} fiche(s) sur ${page.total ?? "?"}, ${withCoords} géolocalisée(s)`;
+    return `${page.results.length} fiche(s) sur ${page.total ?? "?"}, ${withCoords} géolocalisée(s), ${localSites} avec établissement en ${department}`;
   });
 
   await ctx.step("Rapprochement par SIREN", async () => {

@@ -51,7 +51,9 @@ Chemin : **onglet Actions du dépôt → workflow dans la colonne de gauche → 
 | `FAIL (INVALID_RESPONSE)` | réponse inattendue : le format de l'API a peut-être changé, ouvrir les logs du job |
 | `FAIL (FAILED)` | autre erreur, détail dans les logs |
 
-Chaque job dépose aussi un fichier JSON non sensible (`.external-results/<slug>.json`) et une section dans le résumé du run.
+Chaque job dépose aussi un fichier JSON non sensible (`.external-results/<slug>.json`) et une section dans le résumé du run. Le job `summary` publie l'artefact **`external-validation-report`** (`external-validation-report.json` : statut réel, latence, nombre de résultats, fournisseur, date par service) et le smoke test publie **`real-data-smoke-report`** (`real-data-smoke-report.json` : Fetched, Normalized, Rejected, Inserted, Updated, Duplicates, Missing location / description / application URL, Companies matched, Match Score calculated, origine REAL). Ces artefacts sont lisibles depuis l'API GitHub sans ouvrir les logs.
+
+Le tableau « Statut réel » du résumé distingue toujours ✅ SUCCESS, ⚪ NOT CONFIGURED, ❌ AUTH ERROR, ❌ NETWORK ERROR, ❌ INVALID RESPONSE et ⚠️ RATE LIMITED : la coche verte du job n'est jamais une validation à elle seule.
 
 ## 3. Exécuter les mêmes validations en local
 

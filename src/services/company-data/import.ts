@@ -26,9 +26,22 @@ async function uniqueSlug(base: string): Promise<string> {
   return `${root}-${Date.now().toString(36)}`;
 }
 
+/**
+ * Site retenu pour localiser l'entreprise : un établissement du département recherché si le siège
+ * est ailleurs (Capgemini a un site à Nantes mais son siège en Île-de-France), sinon le siège.
+ */
+export function pickSite(record: CompanyRecord, preferredDepartments: string[] = []): { city: string | null; postalCode: string | null; departmentCode: string | null; latitude: number | null; longitude: number | null; address: string | null; siret: string | null; fromEstablishment: boolean } {
+  const local = preferredDepartments.length ? record.establishments.find((e) => e.departmentCode && preferredDepartments.includes(e.departmentCode)) : undefined;
+  if (local && (!record.departmentCode || !preferredDepartments.includes(record.departmentCode))) {
+    return { city: local.city, postalCode: local.postalCode, departmentCode: local.departmentCode, latitude: local.latitude, longitude: local.longitude, address: local.address, siret: local.siret, fromEstablishment: true };
+  }
+  return { city: record.city, postalCode: record.postalCode, departmentCode: record.departmentCode, latitude: record.latitude, longitude: record.longitude, address: record.address, siret: record.siret, fromEstablishment: false };
+}
+
 /** Colonnes Company dérivées d'une fiche officielle. Taille = REAL si la tranche d'effectif est connue. */
-export function companyColumnsFromRecord(record: CompanyRecord, sourceKey: string, now: Date) {
-  const dep = findDepartmentByCode(record.departmentCode);
+export function companyColumnsFromRecord(record: CompanyRecord, sourceKey: string, now: Date, preferredDepartments: string[] = []) {
+  const site = pickSite(record, preferredDepartments);
+  const dep = findDepartmentByCode(site.departmentCode);
   const naf = nafMapping(record.nafCode);
   const size = sizeFromCategory(record.category, record.employeeRange);
   const displayName = record.brandName && record.brandName.length >= 3 ? record.brandName : record.legalName;
@@ -46,13 +59,13 @@ export function companyColumnsFromRecord(record: CompanyRecord, sourceKey: strin
     employeeRangeLabel: record.employeeRangeLabel,
     headcount: record.headcountEstimate,
     registeredAt: record.registeredAt,
-    address: record.address,
-    city: record.city ?? "France",
-    postalCode: record.postalCode,
+    address: site.address,
+    city: site.city ?? "France",
+    postalCode: site.postalCode,
     department: dep?.name ?? null,
     region: dep?.region ?? null,
-    latitude: record.latitude,
-    longitude: record.longitude,
+    latitude: site.latitude,
+    longitude: site.longitude,
     sector: naf?.sector ?? "other",
     size: size ?? ("PME" as const),
     sizeOrigin: size ? ("REAL" as const) : ("UNKNOWN" as const),
@@ -66,9 +79,23 @@ export function companyColumnsFromRecord(record: CompanyRecord, sourceKey: strin
   };
 }
 
-export async function upsertCompanyRecord(record: CompanyRecord, provider: CompanyDataProvider, now = new Date()): Promise<"created" | "updated" | "skipped"> {
+/** Ajoute les établissements locaux comme implantations (une par ville / code postal, 5 max). */
+async function upsertLocations(companyId: string, record: CompanyRecord, preferredDepartments: string[]): Promise<void> {
+  const sites = record.establishments.filter((e) => e.city && (!preferredDepartments.length || (e.departmentCode && preferredDepartments.includes(e.departmentCode)))).slice(0, 5);
+  if (sites.length === 0) return;
+  const existing = await prisma.companyLocation.findMany({ where: { companyId }, select: { city: true, postalCode: true } });
+  for (const site of sites) {
+    if (existing.some((l) => l.city === site.city && (l.postalCode ?? null) === site.postalCode)) continue;
+    const dep = findDepartmentByCode(site.departmentCode);
+    await prisma.companyLocation.create({
+      data: { companyId, label: site.isHeadquarters ? "Siège" : `Établissement ${site.city}`, address: site.address, city: site.city!, postalCode: site.postalCode, department: dep?.name ?? null, region: dep?.region ?? null, latitude: site.latitude, longitude: site.longitude, isHeadquarters: site.isHeadquarters },
+    });
+  }
+}
+
+export async function upsertCompanyRecord(record: CompanyRecord, provider: CompanyDataProvider, now = new Date(), preferredDepartments: string[] = []): Promise<"created" | "updated" | "skipped"> {
   if (!record.isActive) return "skipped";
-  const cols = companyColumnsFromRecord(record, provider.key, now);
+  const cols = companyColumnsFromRecord(record, provider.key, now, preferredDepartments);
   const { dataSourceRef, jobFamilies, ...data } = cols;
   const existing =
     (await prisma.company.findFirst({ where: { siren: record.siren }, select: { id: true, dataSources: true, jobFamilies: true, website: true, description: true, isDemo: true } })) ??
@@ -84,11 +111,14 @@ export async function upsertCompanyRecord(record: CompanyRecord, provider: Compa
         dataSources: mergeDataSources(existing.dataSources, dataSourceRef) as unknown as Prisma.InputJsonValue,
       },
     });
+    await upsertLocations(existing.id, record, preferredDepartments);
     return "updated";
   }
-  await prisma.company.create({
+  const created = await prisma.company.create({
     data: { ...data, slug: await uniqueSlug(cols.name), jobFamilies, technologies: [], hiresApprentices: false, isHiring: false, dataSources: [dataSourceRef] as unknown as Prisma.InputJsonValue },
+    select: { id: true },
   });
+  await upsertLocations(created.id, record, preferredDepartments);
   return "created";
 }
 
@@ -124,7 +154,7 @@ export async function importCompanies(options: CompanyImportOptions): Promise<Co
       for (const record of result.results) {
         report.fetched++;
         try {
-          const outcome = await upsertCompanyRecord(record, provider, now());
+          const outcome = await upsertCompanyRecord(record, provider, now(), params.departmentCodes ?? []);
           if (outcome === "created") report.created++;
           else if (outcome === "updated") report.updated++;
           else report.skipped++;

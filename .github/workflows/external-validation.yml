@@ -310,19 +310,87 @@ jobs:
           AI_PROVIDER: ${{ needs.ai-provider-validation.outputs.provider }}
           AI_MODEL: ${{ needs.ai-provider-validation.outputs.model }}
           AI_MSG: ${{ needs.ai-provider-validation.outputs.message }}
+          FT_DATE: ${{ needs.france-travail-validation.outputs.tested_at }}
+          CO_DATE: ${{ needs.company-api-validation.outputs.tested_at }}
+          OS_DATE: ${{ needs.osrm-validation.outputs.tested_at }}
+          AI_DATE: ${{ needs.ai-provider-validation.outputs.tested_at }}
         run: |
-          label() { case "$1" in SUCCESS) echo "✅ PASS" ;; NOT_CONFIGURED) echo "⚪ NOT CONFIGURED" ;; ""|NOT_RUN) echo "⚪ NOT RUN" ;; *) echo "❌ FAIL ($1)" ;; esac; }
+          label() {
+            case "$1" in
+              SUCCESS) echo "✅ SUCCESS" ;;
+              NOT_CONFIGURED) echo "⚪ NOT CONFIGURED" ;;
+              AUTH_ERROR) echo "❌ AUTH ERROR" ;;
+              NETWORK_ERROR) echo "❌ NETWORK ERROR" ;;
+              INVALID_RESPONSE) echo "❌ INVALID RESPONSE" ;;
+              RATE_LIMIT) echo "⚠️ RATE LIMITED" ;;
+              ""|NOT_RUN) echo "⚪ NOT RUN" ;;
+              *) echo "❌ $1" ;;
+            esac
+          }
           {
             echo "## External Validation"
             echo ""
             echo "_Testé le $(date -u +'%Y-%m-%d %H:%M UTC') · run #${GITHUB_RUN_NUMBER}_"
             echo ""
-            echo "| Service | Résultat | Latence | Résultats | Fournisseur | Note |"
+            echo "| Service | Statut réel | Latence | Résultats | Fournisseur | Date du test |"
             echo "|---|---|---|---|---|---|"
-            echo "| France Travail | $(label "$FT_STATUS") | ${FT_LAT:-—} ms | ${FT_COUNT:-—} offres | france-travail | ${FT_MSG:-—} |"
-            echo "| Company API | $(label "$CO_STATUS") | ${CO_LAT:-—} ms | ${CO_COUNT:-—} fiches | recherche-entreprises | ${CO_MSG:-—} |"
-            echo "| OSRM | $(label "$OS_STATUS") | ${OS_LAT:-—} ms | — | osrm | ${OS_MSG:-—} |"
-            echo "| AI Provider | $(label "$AI_STATUS") | ${AI_LAT:-—} ms | — | ${AI_PROVIDER:-—} ${AI_MODEL:+(}${AI_MODEL}${AI_MODEL:+)} | ${AI_MSG:-—} |"
+            echo "| France Travail | $(label "$FT_STATUS") | ${FT_LAT:-—} ms | ${FT_COUNT:-—} offres | france-travail | ${FT_DATE:-—} |"
+            echo "| Recherche entreprises | $(label "$CO_STATUS") | ${CO_LAT:-—} ms | ${CO_COUNT:-—} fiches | recherche-entreprises | ${CO_DATE:-—} |"
+            echo "| IA | $(label "$AI_STATUS") | ${AI_LAT:-—} ms | — | ${AI_PROVIDER:-—} ${AI_MODEL:+(}${AI_MODEL}${AI_MODEL:+)} | ${AI_DATE:-—} |"
+            echo "| OSRM | $(label "$OS_STATUS") | ${OS_LAT:-—} ms | — | osrm | ${OS_DATE:-—} |"
             echo ""
-            echo "PASS = vérifié en conditions réelles · NOT CONFIGURED = secret ou variable absent (rien n'est simulé) · FAIL = catégorie d'erreur entre parenthèses (NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, INVALID_RESPONSE, FAILED)."
+            [ -n "$FT_MSG" ] && echo "- France Travail : ${FT_MSG}"
+            [ -n "$CO_MSG" ] && echo "- Recherche entreprises : ${CO_MSG}"
+            [ -n "$AI_MSG" ] && echo "- IA : ${AI_MSG}"
+            [ -n "$OS_MSG" ] && echo "- OSRM : ${OS_MSG}"
+            echo ""
+            echo "Un job vert ne vaut pas validation : seul ✅ SUCCESS signifie que l'API a réellement répondu. ⚪ NOT CONFIGURED = secret ou variable absent, rien n'est simulé. Le rapport JSON non sensible est joint en artefact (external-validation-report.json)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Produire external-validation-report.json (sans donnée sensible)
+        env:
+          FT_STATUS: ${{ needs.france-travail-validation.outputs.status }}
+          FT_LAT: ${{ needs.france-travail-validation.outputs.latency_ms }}
+          FT_COUNT: ${{ needs.france-travail-validation.outputs.count }}
+          FT_DATE: ${{ needs.france-travail-validation.outputs.tested_at }}
+          FT_MSG: ${{ needs.france-travail-validation.outputs.message }}
+          CO_STATUS: ${{ needs.company-api-validation.outputs.status }}
+          CO_LAT: ${{ needs.company-api-validation.outputs.latency_ms }}
+          CO_COUNT: ${{ needs.company-api-validation.outputs.count }}
+          CO_DATE: ${{ needs.company-api-validation.outputs.tested_at }}
+          CO_MSG: ${{ needs.company-api-validation.outputs.message }}
+          OS_STATUS: ${{ needs.osrm-validation.outputs.status }}
+          OS_LAT: ${{ needs.osrm-validation.outputs.latency_ms }}
+          OS_DATE: ${{ needs.osrm-validation.outputs.tested_at }}
+          OS_MSG: ${{ needs.osrm-validation.outputs.message }}
+          AI_STATUS: ${{ needs.ai-provider-validation.outputs.status }}
+          AI_LAT: ${{ needs.ai-provider-validation.outputs.latency_ms }}
+          AI_PROVIDER: ${{ needs.ai-provider-validation.outputs.provider }}
+          AI_MODEL: ${{ needs.ai-provider-validation.outputs.model }}
+          AI_DATE: ${{ needs.ai-provider-validation.outputs.tested_at }}
+          AI_MSG: ${{ needs.ai-provider-validation.outputs.message }}
+        run: |
+          node -e '
+            const e = process.env;
+            const num = (v) => (v && !Number.isNaN(Number(v)) ? Number(v) : null);
+            const svc = (status, latency, count, testedAt, message, extra = {}) => ({ status: status || "NOT_RUN", latencyMs: num(latency), resultCount: num(count), testedAt: testedAt || null, message: message || null, ...extra });
+            const report = {
+              generatedAt: new Date().toISOString(),
+              runNumber: Number(e.GITHUB_RUN_NUMBER),
+              runId: Number(e.GITHUB_RUN_ID),
+              branch: e.GITHUB_REF_NAME,
+              commit: e.GITHUB_SHA,
+              franceTravail: svc(e.FT_STATUS, e.FT_LAT, e.FT_COUNT, e.FT_DATE, e.FT_MSG, { provider: "france-travail" }),
+              companyApi: svc(e.CO_STATUS, e.CO_LAT, e.CO_COUNT, e.CO_DATE, e.CO_MSG, { provider: "recherche-entreprises" }),
+              aiProvider: svc(e.AI_STATUS, e.AI_LAT, null, e.AI_DATE, e.AI_MSG, { provider: e.AI_PROVIDER || null, model: e.AI_MODEL || null }),
+              osrm: svc(e.OS_STATUS, e.OS_LAT, null, e.OS_DATE, e.OS_MSG, { provider: "osrm" }),
+            };
+            require("fs").writeFileSync("external-validation-report.json", JSON.stringify(report, null, 2));
+            console.log(JSON.stringify(report, null, 2));
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: external-validation-report
+          path: external-validation-report.json
+          retention-days: 30

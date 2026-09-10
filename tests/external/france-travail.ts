@@ -72,6 +72,37 @@ void runExternalTest("France Travail", "france-travail", async (ctx) => {
     return `${page.jobs.length} offre(s) sur ${page.total ?? "?"} annoncée(s), ${page.requests} requête(s)`;
   });
 
+  // Diagnostic : mesure l'effet de chaque filtre (rayon seul, nature de contrat, mots-clés avec et sans accent)
+  // pour distinguer « peu d'offres » de « filtre mal formé ». Cinq requêtes de comptage.
+  await ctx.step("Diagnostic des filtres (comptages, range 0-49)", async () => {
+    const commune = await provider.communes().resolve(city);
+    if (!commune) return "ignoré (commune inconnue)";
+    const { stripAccents } = await import("../../src/lib/text/normalize");
+    const nature = (await provider.alternanceNatureCodes()).join(",");
+    const count = async (params: Parameters<typeof client.search>[0]) => {
+      const r = await client.search({ ...params, range: { start: 0, end: 49 } });
+      return r.contentRange?.total ?? r.resultats.length;
+    };
+    const base = { commune: commune.inseeCode, distance: radius };
+    const all = await count(base);
+    const alternance = await count({ ...base, natureContrat: nature });
+    const keyword = await count({ ...base, natureContrat: nature, motsCles: q });
+    const plain = stripAccents(q) !== q ? await count({ ...base, natureContrat: nature, motsCles: stripAccents(q) }) : keyword;
+    const keywordNoNature = await count({ ...base, motsCles: q });
+    ctx.detail("diag.radiusOnly", all);
+    ctx.detail("diag.alternance", alternance);
+    ctx.detail("diag.alternanceKeyword", keyword);
+    ctx.detail("diag.alternanceKeywordNoAccent", plain);
+    ctx.detail("diag.keywordNoNature", keywordNoNature);
+    const samples = (page?.jobs ?? []).slice(0, 3).map((j) => {
+      const o = j.raw as { natureContrat?: string; typeContratLibelle?: string; alternance?: boolean } | undefined;
+      return `${j.externalId}: nature=« ${o?.natureContrat ?? "?"} » type=« ${o?.typeContratLibelle ?? "?"} » alternance=${String(o?.alternance)}`;
+    });
+    for (const s of samples) ctx.info(s);
+    if (alternance > 0 && keyword === 0) ctx.warn(`Le mot-clé « ${q} » ne renvoie rien alors que ${alternance} offre(s) d'alternance existent dans le rayon : vérifier la sémantique de motsCles.`);
+    return `rayon seul=${all} · nature ${nature}=${alternance} · + « ${q} »=${keyword} · + « ${stripAccents(q)} »=${plain} · « ${q} » sans filtre nature=${keywordNoNature}`;
+  });
+
   await ctx.step("Validation et normalisation", async () => {
     const jobs = page?.jobs ?? [];
     const rejected: Record<string, number> = {};

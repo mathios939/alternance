@@ -28,6 +28,19 @@ export type CompanySearchParams = {
   perPage?: number;
 };
 
+/** Établissement (site) d'une entreprise ; le siège peut être hors de la zone recherchée. */
+export type CompanyEstablishment = {
+  siret: string;
+  address: string | null;
+  city: string | null;
+  postalCode: string | null;
+  inseeCode: string | null;
+  departmentCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  isHeadquarters: boolean;
+};
+
 export type CompanyRecord = {
   siren: string;
   siret: string | null;
@@ -52,6 +65,8 @@ export type CompanyRecord = {
   category: string | null;
   website: string | null;
   sourceUrl: string;
+  /** Établissements ayant satisfait le filtre géographique de la recherche (peut être vide). */
+  establishments: CompanyEstablishment[];
   raw?: unknown;
 };
 

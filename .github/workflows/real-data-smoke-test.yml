@@ -114,9 +114,26 @@ jobs:
         run: |
           if [ "$CONFIGURED" = "true" ]; then
             npx tsx tests/external/report.ts real-data-smoke
+            if [ -f .external-results/real-data-smoke.json ]; then
+              cp .external-results/real-data-smoke.json real-data-smoke-report.json
+              STATUS=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("real-data-smoke-report.json","utf8")).status)')
+              case "$STATUS" in
+                SUCCESS) LABEL="✅ SUCCESS" ;; NOT_CONFIGURED) LABEL="⚪ NOT CONFIGURED" ;; AUTH_ERROR) LABEL="❌ AUTH ERROR" ;;
+                NETWORK_ERROR) LABEL="❌ NETWORK ERROR" ;; INVALID_RESPONSE) LABEL="❌ INVALID RESPONSE" ;; RATE_LIMIT) LABEL="⚠️ RATE LIMITED" ;; *) LABEL="❌ $STATUS" ;;
+              esac
+              printf '## Real data smoke test — %s\n\nLe rapport détaillé (compteurs Fetched / Normalized / Rejected / Inserted / Duplicates / Companies matched / Match Score…) figure dans la section ci-dessus et dans l'"'"'artefact real-data-smoke-report.json. Base PostgreSQL éphémère détruite avec le runner.\n' "$LABEL" >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             echo "status=NOT_CONFIGURED" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.check.outputs.configured == 'true'
+        with:
+          name: real-data-smoke-report
+          path: real-data-smoke-report.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Statut du job (la base éphémère est détruite avec le runner)
         if: always()

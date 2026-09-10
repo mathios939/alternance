@@ -50,15 +50,30 @@ void runExternalTest("Smoke test données réelles", "real-data-smoke", async (c
   const { findCity } = await import("../../src/config/cities");
   const provider = new FranceTravailProvider({ clientId, clientSecret, client: { timeoutMs: 15_000, maxRetries: 1 } });
 
-  // 1. FETCH
+  // 1. FETCH — si le mot-clé renvoie trop peu d'offres pour exercer le pipeline, on élargit à toutes les
+  // offres d'alternance du rayon (même commune, même distance) et on le dit explicitement dans le rapport.
+  const MIN_FOR_PIPELINE = 5;
+  let params: { keywords?: string; city: string; radiusKm: number; limit: number } = { keywords: q, city, radiusKm: radius, limit };
   let page: Awaited<ReturnType<typeof provider.fetchJobs>> = { jobs: [], total: null, requests: 0, warnings: [] };
   await ctx.step(`Fetch France Travail « ${q} » à ${city} (${radius} km, ${limit} max)`, async () => {
     const t0 = Date.now();
-    page = await provider.fetchJobs({ keywords: q, city, radiusKm: radius, limit });
+    page = await provider.fetchJobs(params);
     ctx.detail("latencyMs", Date.now() - t0);
-    ctx.detail("Fetched", page.jobs.length);
+    ctx.detail("Fetched (keyword)", page.jobs.length);
     ctx.detail("requests", page.requests);
     for (const w of page.warnings) ctx.warn(w);
+    if (page.jobs.length < MIN_FOR_PIPELINE) {
+      const broad = await provider.fetchJobs({ city, radiusKm: radius, limit });
+      ctx.warn(`Seulement ${page.jobs.length} offre(s) pour « ${q} » : repli sur toutes les offres d'alternance du rayon (${broad.jobs.length} offre(s) sur ${broad.total ?? "?"}) pour exercer le pipeline. Les compteurs ci-dessous portent sur ce repli.`);
+      ctx.detail("Fallback (no keyword)", true);
+      ctx.detail("Fetched (radius, no keyword)", broad.jobs.length);
+      ctx.detail("Announced total (radius)", broad.total);
+      params = { city, radiusKm: radius, limit };
+      page = broad;
+    } else {
+      ctx.detail("Fallback (no keyword)", false);
+    }
+    ctx.detail("Fetched", page.jobs.length);
     if (page.jobs.length === 0) ctx.warn("Aucune offre renvoyée : le reste du rapport sera vide.");
     return `${page.jobs.length} offre(s) sur ${page.total ?? "?"} annoncée(s), ${page.requests} requête(s)`;
   });
@@ -97,7 +112,7 @@ void runExternalTest("Smoke test données réelles", "real-data-smoke", async (c
   // 3. BASE DE TEST (pipeline complet, dédoublonnage inclus)
   let report: Awaited<ReturnType<typeof runIngestion>> | null = null;
   await ctx.step("Ingestion dans la base de test (validation → dédoublonnage → enrichissement)", async () => {
-    report = await runIngestion({ provider, params: { keywords: q, city, radiusKm: radius, limit }, maxJobs: limit, trigger: "smoke" });
+    report = await runIngestion({ provider, params, maxJobs: limit, trigger: "smoke" });
     if (report.errors.length && report.fetched === 0) throw new Error(report.errors[0]);
     ctx.detail("Inserted", report.created);
     ctx.detail("Updated", report.updated);
@@ -108,7 +123,7 @@ void runExternalTest("Smoke test données réelles", "real-data-smoke", async (c
   });
 
   await ctx.step("Dédoublonnage (seconde passe sur les mêmes offres)", async () => {
-    const second = await runIngestion({ provider, params: { keywords: q, city, radiusKm: radius, limit }, maxJobs: limit, trigger: "smoke" });
+    const second = await runIngestion({ provider, params, maxJobs: limit, trigger: "smoke" });
     if (second.created > 0) throw new Error(`${second.created} offre(s) recréée(s) : le dédoublonnage par identifiant externe a échoué`);
     return `0 création, ${second.updated} mise(s) à jour, ${second.duplicates} rattachement(s)`;
   });
@@ -119,6 +134,9 @@ void runExternalTest("Smoke test données réelles", "real-data-smoke", async (c
   await ctx.step("Rapprochement entreprises et qualité des données", async () => {
     const matched = entries.filter((e) => !e.job.company.isPlaceholder).length;
     const anonymous = entries.length - matched;
+    const demo = entries.filter((e) => e.job.isDemo || e.job.dataOrigin !== "REAL").length;
+    ctx.detail("Data origin", demo === 0 ? `REAL (${entries.length}/${entries.length})` : `ATTENTION : ${demo} offre(s) non REAL`);
+    if (demo > 0) throw new Error(`${demo} offre(s) ingérée(s) ne sont pas marquées REAL`);
     const scores = entries.map((e) => e.job.dataQualityScore).filter((s): s is number => s !== null);
     const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
     const labels: Record<string, number> = {};
