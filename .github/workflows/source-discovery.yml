@@ -1,0 +1,85 @@
+name: Source discovery (La bonne alternance)
+
+# Déclenchement manuel. Vérifie, depuis un runner avec réseau, ce qu'exige RÉELLEMENT l'API Alternance
+# (La bonne alternance, Ministère du Travail) avant toute intégration : documentation OpenAPI
+# joignable, authentification requise ou non, codes HTTP des points d'entrée, licence annoncée.
+# Aucune donnée n'est stockée, aucun secret n'est affiché (la clé, si présente, n'est utilisée
+# que pour un appel de test et son résultat est résumé).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Documentation, authentification, quotas, licence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LBA_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+    steps:
+      - name: Sonder l'API Alternance (valeurs jamais affichées)
+        run: |
+          set +e
+          probe() { # label url [header]
+            if [ -n "$3" ]; then code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 30 -H "$3" -H "accept: application/json" "$2"); else code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 30 -H "accept: application/json" "$2"); fi
+            size=$(wc -c < body.txt)
+            head=$(head -c 400 body.txt | tr '\n' ' ' | sed 's/[[:cntrl:]]//g')
+            echo "| $1 | $code | $size o | \`${head//|/¦}\` |" >> table.md
+            echo "$1 → $code ($size o)"
+          }
+          echo "| Sonde | HTTP | Taille | Début de réponse |" > table.md
+          echo "|---|---|---|---|" >> table.md
+          probe "OpenAPI (api.apprentissage.beta.gouv.fr/api/openapi.json)" "https://api.apprentissage.beta.gouv.fr/api/openapi.json"
+          probe "OpenAPI (…/documentation/json)" "https://api.apprentissage.beta.gouv.fr/documentation/json"
+          probe "Racine API" "https://api.apprentissage.beta.gouv.fr/api"
+          probe "Healthcheck" "https://api.apprentissage.beta.gouv.fr/api/healthcheck"
+          probe "Recherche offres v1 SANS clé (Nantes, 30 km)" "https://api.apprentissage.beta.gouv.fr/api/job/v1/search?latitude=47.2184&longitude=-1.5536&radius=30"
+          probe "Export offres v1 SANS clé" "https://api.apprentissage.beta.gouv.fr/api/job/v1/export"
+          probe "Ancienne API v1 LBA SANS clé (jobsEtFormations)" "https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/jobsEtFormations?caller=alternance-os&romes=M1805&latitude=47.2184&longitude=-1.5536&radius=30"
+          probe "Ancienne API v1 LBA SANS clé (jobs)" "https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/jobs?caller=alternance-os&romes=M1805&latitude=47.2184&longitude=-1.5536&radius=30"
+          probe "CGU / licence (page documentation)" "https://api.apprentissage.beta.gouv.fr/documentation"
+          if [ -n "$LBA_KEY" ]; then
+            probe "Recherche offres v1 AVEC clé (Nantes, 30 km)" "https://api.apprentissage.beta.gouv.fr/api/job/v1/search?latitude=47.2184&longitude=-1.5536&radius=30" "Authorization: Bearer $LBA_KEY"
+            probe "Export offres v1 AVEC clé" "https://api.apprentissage.beta.gouv.fr/api/job/v1/export" "Authorization: Bearer $LBA_KEY"
+            echo "Clé LA_BONNE_ALTERNANCE_API_KEY : présente" >> table.md
+          else
+            echo "" >> table.md
+            echo "Clé LA_BONNE_ALTERNANCE_API_KEY : absente (GitHub → Settings → Secrets and variables → Actions)" >> table.md
+          fi
+          # Chemins et sécurité déclarés par l'OpenAPI, si joignable
+          for u in "https://api.apprentissage.beta.gouv.fr/api/openapi.json" "https://api.apprentissage.beta.gouv.fr/documentation/json"; do
+            if curl -sS --max-time 30 -H "accept: application/json" "$u" -o openapi.json && node -e 'JSON.parse(require("fs").readFileSync("openapi.json","utf8"))' 2>/dev/null; then
+              echo "" >> table.md
+              echo "### OpenAPI ($u)" >> table.md
+              node -e '
+                const s=JSON.parse(require("fs").readFileSync("openapi.json","utf8"));
+                const info=s.info||{};
+                console.log("- titre : "+(info.title||"?")+" · version : "+(info.version||"?"));
+                if(info.termsOfService) console.log("- conditions : "+info.termsOfService);
+                if(info.license) console.log("- licence : "+JSON.stringify(info.license));
+                if(info.description) console.log("- description : "+String(info.description).replace(/\s+/g," ").slice(0,600));
+                const sec=(s.components&&s.components.securitySchemes)||{};
+                console.log("- schémas de sécurité : "+JSON.stringify(sec).slice(0,600));
+                const paths=Object.keys(s.paths||{});
+                console.log("- points d entrée ("+paths.length+") :");
+                for(const p of paths){ const ops=Object.keys(s.paths[p]); const first=s.paths[p][ops[0]]||{}; console.log("  - "+ops.join(",").toUpperCase()+" "+p+(first.summary?" — "+first.summary:"")+(first.security?" [auth]":"")); }
+                const job=(s.paths["/api/job/v1/search"]||s.paths["/job/v1/search"]||{}).get;
+                if(job){ console.log("- paramètres de /job/v1/search : "+(job.parameters||[]).map(p=>p.name+(p.required?"*":"")).join(", ")); const r=job.responses&&job.responses["200"]; if(r) console.log("- réponse 200 : "+JSON.stringify(r).slice(0,1500)); }
+                const exp=(s.paths["/api/job/v1/export"]||s.paths["/job/v1/export"]||{}).get;
+                if(exp){ console.log("- /job/v1/export : "+JSON.stringify(exp).slice(0,1200)); }
+              ' >> table.md 2>/dev/null || echo "(OpenAPI illisible)" >> table.md
+              node -e '
+                const s=JSON.parse(require("fs").readFileSync("openapi.json","utf8"));
+                const p=s.paths["/api/job/v1/search"]||s.paths["/job/v1/search"];
+                if(!p) process.exit(0);
+                const schema=(((p.get||{}).responses||{})["200"]||{}).content;
+                console.log("\n### Schéma de réponse /job/v1/search (tronqué)\n");
+                console.log("```json\n"+JSON.stringify(schema,null,1).slice(0,6000)+"\n```");
+              ' >> table.md 2>/dev/null || true
+              break
+            fi
+          done
+          { echo "## Source discovery — La bonne alternance"; echo; cat table.md; } >> "$GITHUB_STEP_SUMMARY"
+          cat table.md
