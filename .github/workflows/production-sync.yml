@@ -1,0 +1,96 @@
+name: Production sync
+
+# Synchronisation automatique de la base de production (secret DATABASE_URL) :
+# nouvelles offres et mises à jour (jobs:sync), vérification auprès de la source (jobs:verify),
+# expiration (jobs:expire). Idempotente (dédoublonnage par identifiant externe), limitée
+# (départements de la variable SYNC_DEPARTMENTS, 7 jours, plafond par requête), observable
+# (résumé du run + table ingestion_run visible dans /admin/data), jamais concurrente
+# (groupe de concurrence, exécution en cours jamais annulée). Sans secret : SKIPPED.
+on:
+  schedule:
+    - cron: "17 5,11,17 * * *" # trois fois par jour (UTC)
+  workflow_dispatch:
+    inputs:
+      departments:
+        description: "Départements à synchroniser (codes séparés par des virgules)"
+        default: ""
+        required: false
+
+concurrency:
+  group: production-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync → verify → expire
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      DEMO_MODE: "false"
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
+      BETTER_AUTH_SECRET: ci-sync-placeholder-not-a-secret
+    steps:
+      - name: Vérifier la présence des secrets (valeurs jamais affichées)
+        id: check
+        env:
+          DB: ${{ secrets.DATABASE_URL }}
+          FT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: |
+          if [ -z "$DB" ] || [ -z "$FT_ID" ] || [ -z "$FT_SECRET" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (DATABASE_URL / FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET)"
+            printf '## Production sync — ⚪ NOT CONFIGURED\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Synchroniser, vérifier, expirer
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          DEPARTMENTS: ${{ inputs.departments || vars.SYNC_DEPARTMENTS || '44' }}
+        run: |
+          printf '## Production sync (%s)\n\nDépartements : `%s`\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DEPARTMENTS" >> "$GITHUB_STEP_SUMMARY"
+          IFS=',' read -ra DEPTS <<< "$DEPARTMENTS"
+          for d in "${DEPTS[@]}"; do
+            d="$(echo "$d" | tr -d ' ')"
+            [ -z "$d" ] && continue
+            npm run jobs:sync -- --department "$d" --since-days 7 --limit 300 --trigger cron | tee "sync-$d.log"
+            grep -E "récupérées|Ignorée|ERREUR|ÉCHEC" "sync-$d.log" | sed 's/\x1b\[[0-9;]*m//g' >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          npm run jobs:verify -- --limit 300 | tee verify.log
+          grep -iE "vérifi|ERREUR|ÉCHEC" verify.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 5 >> "$GITHUB_STEP_SUMMARY" || true
+          npm run jobs:expire | tee expire.log
+          grep -iE "expir|UNKNOWN|ERREUR|ÉCHEC" expire.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 5 >> "$GITHUB_STEP_SUMMARY" || true
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: État de la base
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          printf '\n### État de la base\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:report | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"

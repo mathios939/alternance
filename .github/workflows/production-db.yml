@@ -1,0 +1,135 @@
+name: Production database
+
+# Déclenchement manuel. Base PostgreSQL PERSISTANTE de production (secret DATABASE_URL) :
+#   1. migrations Prisma (`prisma migrate deploy` uniquement : jamais reset, jamais db push) ;
+#   2. ingestion réelle CONTRÔLÉE (par défaut : Loire-Atlantique, 31 jours, 300 offres max) ;
+#   3. import ciblé d'entreprises réelles (SIRENE) pour le même département ;
+#   4. vérification des offres auprès de la source ;
+#   5. état de la base (compteurs, aucune donnée personnelle).
+# Sans DATABASE_URL : SKIPPED — SECRET NOT CONFIGURED (aucune simulation).
+on:
+  workflow_dispatch:
+    inputs:
+      ingest:
+        description: "Lancer l'ingestion contrôlée après les migrations"
+        type: boolean
+        default: true
+      department:
+        description: "Département (code) à synchroniser"
+        default: "44"
+        required: false
+      since_days:
+        description: "Fenêtre de publication (jours)"
+        default: "31"
+        required: false
+      limit:
+        description: "Nombre max d'offres récupérées"
+        default: "300"
+        required: false
+      companies:
+        description: "Importer les entreprises (SIRENE) du département"
+        type: boolean
+        default: true
+
+concurrency:
+  group: production-database
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate-and-ingest:
+    name: Migrations → ingestion contrôlée → vérification → état
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      DEMO_MODE: "false"
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
+    steps:
+      - name: Vérifier la présence de DATABASE_URL (valeur jamais affichée)
+        id: check
+        env:
+          DB: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DB" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (DATABASE_URL)"
+            echo "::warning title=Production database::SKIPPED — SECRET NOT CONFIGURED"
+            printf '## Production database — ⚪ NOT CONFIGURED\n\nAjoute le secret `DATABASE_URL` (GitHub repository → Settings → Secrets and variables → Actions).\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            case "$DB" in
+              *localhost*|*127.0.0.1*) echo "::error::DATABASE_URL pointe vers une base locale : ce workflow vise une base persistante."; exit 1 ;;
+            esac
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Appliquer les migrations (prisma migrate deploy)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate status
+          printf '## Production database\n\n- Migrations : ✅ appliquées (`prisma migrate deploy`)\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ingestion réelle contrôlée (France Travail, département ${{ inputs.department }})
+        if: steps.check.outputs.configured == 'true' && inputs.ingest
+        id: ingest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          DEPT: ${{ inputs.department }}
+          SINCE: ${{ inputs.since_days }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          npm run jobs:sync -- --department "$DEPT" --since-days "$SINCE" --limit "$LIMIT" --trigger cron | tee ingest.log
+          printf -- '- Ingestion France Travail (département %s, %s jours, %s max) : voir le journal\n' "$DEPT" "$SINCE" "$LIMIT" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "récupérées|Ignorée|ERREUR|ÉCHEC" ingest.log | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Entreprises réelles (SIRENE, département ${{ inputs.department }}, métiers du développement)
+        if: steps.check.outputs.configured == 'true' && inputs.companies
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+          DEPT: ${{ inputs.department }}
+        run: npm run companies:import -- --department "$DEPT" --family dev --max 100
+
+      - name: Vérification des offres auprès de la source
+        if: steps.check.outputs.configured == 'true' && inputs.ingest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+        run: npm run jobs:verify -- --limit 100
+
+      - name: État de la base (compteurs, aucune donnée personnelle)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+        run: |
+          npm run db:report | tee report.log
+          printf '\n### État de la base\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          sed 's/\x1b\[[0-9;]*m//g' report.log >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"

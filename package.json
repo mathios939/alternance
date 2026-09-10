@@ -31,6 +31,7 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
     "db:studio": "prisma studio",
+    "db:report": "tsx scripts/db-report.ts",
     "jobs:sync": "tsx scripts/jobs-sync.ts",
     "jobs:verify": "tsx scripts/jobs-verify.ts",
     "jobs:expire": "tsx scripts/jobs-expire.ts",

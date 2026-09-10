@@ -1,0 +1,174 @@
+name: Production deploy (Vercel)
+
+# Déclenchement manuel. Déploie la branche courante en PRODUCTION sur Vercel avec le seul secret
+# VERCEL_TOKEN : crée ou relie le projet, pousse les variables d'environnement (valeurs jamais
+# affichées), applique les migrations Prisma (`migrate deploy` uniquement), construit, déploie,
+# puis vérifie l'URL publique (pages publiques en 200, endpoint de santé).
+# Sans VERCEL_TOKEN ou DATABASE_URL : SKIPPED — SECRET NOT CONFIGURED.
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "Nom du projet Vercel"
+        default: "alternance-os"
+        required: false
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Projet → variables → migrations → build → déploiement → vérification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PROJECT: ${{ inputs.project || 'alternance-os' }}
+    steps:
+      - name: Vérifier la présence des secrets (valeurs jamais affichées)
+        id: check
+        env:
+          TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DB: ${{ secrets.DATABASE_URL }}
+        run: |
+          missing=""
+          [ -z "$TOKEN" ] && missing="$missing VERCEL_TOKEN"
+          [ -z "$DB" ] && missing="$missing DATABASE_URL"
+          if [ -n "$missing" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED ($missing)"
+            printf '## Production deploy — ⚪ NOT CONFIGURED\n\nSecrets manquants :%s (GitHub repository → Settings → Secrets and variables → Actions).\n' "$missing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances et la CLI Vercel
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          npm ci
+          npm install --no-save vercel@latest
+
+      - name: Créer ou relier le projet Vercel
+        if: steps.check.outputs.configured == 'true'
+        id: project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx vercel project add "$PROJECT" --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
+          npx vercel link --yes --project "$PROJECT" --token "$VERCEL_TOKEN"
+          ORG_ID=$(node -e 'console.log(require("./.vercel/project.json").orgId)')
+          PROJECT_ID=$(node -e 'console.log(require("./.vercel/project.json").projectId)')
+          echo "::add-mask::$ORG_ID"
+          echo "::add-mask::$PROJECT_ID"
+          echo "org_id=$ORG_ID" >> "$GITHUB_OUTPUT"
+          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+          DOMAIN=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$PROJECT_ID/domains?teamId=$ORG_ID" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);const list=(j.domains||[]).map(x=>x.name);console.log(list.find(n=>n.endsWith(".vercel.app"))||list[0]||"")})')
+          if [ -z "$DOMAIN" ]; then DOMAIN="$PROJECT.vercel.app"; fi
+          echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "Domaine de production : https://$DOMAIN"
+
+      - name: Pousser les variables d'environnement de production (valeurs jamais affichées)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ steps.project.outputs.org_id }}
+          VERCEL_PROJECT_ID: ${{ steps.project.outputs.project_id }}
+          DOMAIN: ${{ steps.project.outputs.domain }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+        run: |
+          set -e
+          existing=$(npx vercel env ls production --token "$VERCEL_TOKEN" 2>/dev/null || true)
+          has() { echo "$existing" | grep -qE "^[[:space:]]*$1[[:space:]]"; }
+          upsert() { # name value : remplace la valeur de production (jamais affichée)
+            if has "$1"; then npx vercel env rm "$1" production --yes --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true; fi
+            printf '%s' "$2" | npx vercel env add "$1" production --token "$VERCEL_TOKEN" >/dev/null
+            echo "  $1 : défini"
+          }
+          keep_or_generate() { # name secret : conserve la valeur Vercel existante, sinon le secret GitHub, sinon génère une valeur aléatoire persistée dans Vercel
+            if [ -n "$2" ]; then upsert "$1" "$2"
+            elif has "$1"; then echo "  $1 : conservé (déjà défini dans Vercel)"
+            else upsert "$1" "$(openssl rand -base64 48 | tr -d '\n=/+' | cut -c1-48)"; fi
+          }
+          upsert DATABASE_URL "$DATABASE_URL"
+          upsert NEXT_PUBLIC_APP_URL "https://$DOMAIN"
+          upsert BETTER_AUTH_URL "https://$DOMAIN"
+          keep_or_generate BETTER_AUTH_SECRET "$BETTER_AUTH_SECRET"
+          keep_or_generate CRON_SECRET "$CRON_SECRET"
+          upsert DEMO_MODE "false"
+          upsert NEXT_PUBLIC_DEMO_MODE "false"
+          upsert COMPANY_DATA_PROVIDER "recherche-entreprises"
+          upsert TRAVEL_TIME_PROVIDER "none"
+          if [ -n "$FRANCE_TRAVAIL_CLIENT_ID" ] && [ -n "$FRANCE_TRAVAIL_CLIENT_SECRET" ]; then
+            upsert FRANCE_TRAVAIL_CLIENT_ID "$FRANCE_TRAVAIL_CLIENT_ID"
+            upsert FRANCE_TRAVAIL_CLIENT_SECRET "$FRANCE_TRAVAIL_CLIENT_SECRET"
+          fi
+          if [ -n "$ADMIN_EMAILS" ]; then upsert ADMIN_EMAILS "$ADMIN_EMAILS"; fi
+
+      - name: Appliquer les migrations (prisma migrate deploy)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ci-migration-placeholder-not-a-secret
+        run: npx prisma migrate deploy
+
+      - name: Construire et déployer en production
+        if: steps.check.outputs.configured == 'true'
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ steps.project.outputs.org_id }}
+          VERCEL_PROJECT_ID: ${{ steps.project.outputs.project_id }}
+        run: |
+          npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+          npx vercel build --prod --token "$VERCEL_TOKEN"
+          URL=$(npx vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Déploiement : $URL"
+
+      - name: Vérifier l'URL publique (pages en 200, santé)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DOMAIN: ${{ steps.project.outputs.domain }}
+        run: |
+          BASE="https://$DOMAIN"
+          sleep 15
+          fail=0
+          {
+            echo "## Production deploy"
+            echo
+            echo "URL : $BASE"
+            echo
+            echo "| Page | HTTP | Redirection |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for p in / /jobs "/jobs?q=d%C3%A9veloppeur&city=Nantes&radius=30" /companies /radar /map /compare /favorites /dashboard /sources /api/health; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "$BASE$p")
+            redirect=$(curl -sS -o /dev/null -w '%{redirect_url}' --max-time 60 "$BASE$p")
+            echo "| $p | $code | ${redirect:-—} |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$code" != "200" ]; then echo "::error::$p → HTTP $code"; fail=1; fi
+            case "$redirect" in *login*|*register*) echo "::error::$p redirige vers la connexion"; fail=1 ;; esac
+          done
+          HEALTH=$(curl -sS --max-time 60 "$BASE/api/health")
+          echo "$HEALTH" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const h=JSON.parse(d);console.log(JSON.stringify({app:h.app,database:h.database,demoMode:h.demoMode,services:h.services,data:h.data},null,2))})' | tee health.json
+          printf '\n```json\n' >> "$GITHUB_STEP_SUMMARY"; cat health.json >> "$GITHUB_STEP_SUMMARY"; printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          node -e 'const h=JSON.parse(require("fs").readFileSync("health.json","utf8")); if(h.database!=="healthy"||h.demoMode!==false){console.error("Santé insuffisante");process.exit(1)}'
+          exit $fail
