@@ -36,20 +36,22 @@ Chemin : **onglet Actions du dépôt → workflow dans la colonne de gauche → 
 
 ### Ordre recommandé
 
-1. **External validation** (`.github/workflows/external-validation.yml`). Quatre jobs indépendants : `france-travail-validation`, `company-api-validation`, `osrm-validation`, `ai-provider-validation`, puis un job `summary` qui écrit le tableau « External Validation » dans le résumé du run (PASS / FAIL / NOT CONFIGURED, latence, nombre de résultats, fournisseur, date).
+1. **External validation** (`.github/workflows/external-validation.yml`). Quatre jobs indépendants : `france-travail-validation`, `company-api-validation`, `osrm-validation`, `ai-provider-validation`, puis un job `summary` qui écrit le tableau « Service / Statut réel » dans le résumé du run (✅ SUCCESS, ⚪ NOT CONFIGURED, ❌ AUTH ERROR, ❌ NETWORK ERROR, ❌ INVALID RESPONSE, ⚠️ RATE LIMITED, latence, nombre de résultats, fournisseur, date).
 2. **Real data smoke test** (`.github/workflows/real-data-smoke-test.yml`), seulement une fois France Travail en PASS. Il démarre un PostgreSQL éphémère (conteneur de service), applique les migrations (`prisma migrate deploy`), ingère au plus 50 vraies offres (« développeur », Nantes, 30 km par défaut), rejoue l'ingestion pour prouver le dédoublonnage, calcule le Match Score avec un candidat synthétique et publie le rapport : Fetched, Normalized, Rejected, Inserted, Duplicates, Missing location, Missing application URL, Missing description, Companies matched, Match Score calculated, External URLs valid format, qualité moyenne. La base est détruite avec le runner ; **aucune base de production n'est jamais contactée**.
 
 ### Lecture des résultats
 
-| Résultat | Signification |
+| Statut réel | Signification |
 |---|---|
-| `PASS` | vérifié en conditions réelles |
-| `NOT CONFIGURED` | secret ou variable absent : le job affiche `SKIPPED — SECRET NOT CONFIGURED` et reste vert, rien n'est simulé |
-| `FAIL (NETWORK_ERROR)` | service injoignable, timeout, 5xx |
-| `FAIL (AUTH_ERROR)` | identifiants refusés (vérifier le secret et l'abonnement à l'API) |
-| `FAIL (RATE_LIMIT)` | limite de débit atteinte : relancer plus tard |
-| `FAIL (INVALID_RESPONSE)` | réponse inattendue : le format de l'API a peut-être changé, ouvrir les logs du job |
-| `FAIL (FAILED)` | autre erreur, détail dans les logs |
+| `✅ SUCCESS` | vérifié en conditions réelles (EXTERNAL_VERIFIED) |
+| `⚪ NOT CONFIGURED` | secret ou variable absent : le job affiche `SKIPPED — SECRET NOT CONFIGURED` et reste vert, rien n'est simulé |
+| `❌ NETWORK ERROR` | service injoignable, timeout, 5xx |
+| `❌ AUTH ERROR` | identifiants refusés (vérifier le secret et l'abonnement à l'API) |
+| `⚠️ RATE LIMITED` | limite de débit atteinte : relancer plus tard |
+| `❌ INVALID RESPONSE` | réponse inattendue : le format de l'API a peut-être changé, ouvrir les logs du job |
+| `❌ FAILED` | autre erreur, détail dans les logs |
+
+Dernière exécution vérifiée (10 septembre 2026, branche `claude/alternance-platform-france-68n436`) : France Travail ✅ SUCCESS, API Recherche d'entreprises ✅ SUCCESS, fournisseur IA ⚪ NOT CONFIGURED, OSRM ⚪ NOT CONFIGURED ; Real data smoke test ✅ SUCCESS (30 vraies offres d'alternance autour de Nantes ingérées dans la base éphémère). Autour de Nantes, le mot-clé « développeur » ne renvoie qu'une offre d'alternance sur les 239 du rayon : le smoke test se replie alors explicitement sur l'ensemble des offres d'alternance pour exercer le pipeline.
 
 Chaque job dépose aussi un fichier JSON non sensible (`.external-results/<slug>.json`) et une section dans le résumé du run. Le job `summary` publie l'artefact **`external-validation-report`** (`external-validation-report.json` : statut réel, latence, nombre de résultats, fournisseur, date par service) et le smoke test publie **`real-data-smoke-report`** (`real-data-smoke-report.json` : Fetched, Normalized, Rejected, Inserted, Updated, Duplicates, Missing location / description / application URL, Companies matched, Match Score calculated, origine REAL). Ces artefacts sont lisibles depuis l'API GitHub sans ouvrir les logs.
 
