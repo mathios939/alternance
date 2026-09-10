@@ -21,6 +21,8 @@ import { SkillsInput } from "@/components/shared/skills-input";
 import { ChipSelect } from "@/components/shared/chip-select";
 import { saveProfile } from "@/features/onboarding/server/actions";
 import { importResumeForOnboarding } from "@/features/onboarding/server/import-resume";
+import { FAMILY_SKILL_SUGGESTIONS } from "@/config/skills";
+import { clearGuestProfile } from "@/lib/guest/use-guest-profile";
 
 const STEPS = [
   { key: "you", title: "Toi", subtitle: "Ce que tu cherches", schema: profileSchema.pick({ firstName: true, targetJobTitle: true }) },
@@ -48,32 +50,7 @@ export function OnboardingWizard({ initial, mode = "onboarding" }: Props) {
   const guessedFamily = useMemo(() => guessJobFamily(values.targetJobTitle), [values.targetJobTitle]);
   const familySkills = useMemo(() => {
     const key = (values.jobFamily ?? guessedFamily) as JobFamilyKey | null;
-    if (!key) return [];
-    const map: Partial<Record<JobFamilyKey, string[]>> = {
-      dev: ["JavaScript", "React", "Node.js", "SQL", "Git", "PHP", "Java", "Python"],
-      data: ["SQL", "Python", "Power BI", "Excel", "Pandas", "Machine Learning"],
-      cyber: ["Linux", "Réseaux", "Cybersécurité", "Python", "SIEM", "Pentest"],
-      infra: ["Linux", "Windows Server", "Réseaux", "Active Directory", "Docker", "Support utilisateur"],
-      marketing: ["SEO", "Social media", "Canva", "Google Analytics", "Emailing", "Content marketing"],
-      communication: ["Communication", "Rédaction", "Canva", "Social media", "Événementiel"],
-      sales: ["Prospection", "Négociation", "CRM", "Relation client", "Vente"],
-      hr: ["Recrutement", "Pack Office", "Administration du personnel", "SIRH"],
-      finance: ["Excel", "Contrôle de gestion", "Power BI", "Analyse financière"],
-      accounting: ["Comptabilité générale", "Excel", "Sage", "Facturation"],
-      design: ["Figma", "Adobe Photoshop", "Adobe Illustrator", "UX/UI Design"],
-      industrial: ["CAO", "Mécanique", "Automatisme", "Lean management"],
-      logistics: ["Supply chain", "Excel", "ERP", "Gestion des stocks"],
-      quality: ["Qualité", "Lean management", "Excel", "Audit"],
-      product: ["Agile", "Jira", "Product Management", "Figma"],
-      "customer-support": ["Relation client", "CRM", "Pack Office", "Communication orale"],
-      admin: ["Pack Office", "Gestion administrative", "Rédaction"],
-      "retail-ops": ["Vente", "Merchandising", "Relation client"],
-      project: ["Gestion de projet", "Agile", "Jira", "Pack Office"],
-      purchasing: ["Achats", "Négociation", "Excel", "Anglais"],
-      legal: ["Droit des affaires", "Conformité", "RGPD", "Rédaction"],
-      health: ["Rigueur", "Sens du service"],
-    };
-    return map[key] ?? [];
+    return key ? (FAMILY_SKILL_SUGGESTIONS[key] ?? []) : [];
   }, [values.jobFamily, guessedFamily]);
 
   function validateStep(): boolean {
@@ -101,6 +78,8 @@ export function OnboardingWizard({ initial, mode = "onboarding" }: Props) {
         return;
       }
       toast.success(mode === "onboarding" ? `Profil créé à ${result.data.completion} %. Bienvenue !` : "Profil mis à jour");
+      // Le profil du compte remplace le profil visiteur du navigateur.
+      if (mode === "onboarding") clearGuestProfile();
       router.push(mode === "onboarding" ? "/dashboard" : "/settings/profile");
       router.refresh();
     });

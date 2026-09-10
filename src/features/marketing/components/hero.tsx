@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, ShieldCheck, Sparkles } from "lucide-react";
+import { Building2, Radar, ShieldCheck, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/features/jobs/components/search-bar";
 
@@ -17,7 +17,7 @@ export function Hero({ stats }: { stats: { jobs: number; companies: number; citi
           Trouve ton alternance <span className="text-gradient">avant les autres.</span>
         </h1>
         <p className="mx-auto mt-5 max-w-2xl text-lg text-muted-foreground text-pretty animate-fade-up [animation-delay:80ms]">
-          Toutes les offres, les entreprises à contacter et les outils nécessaires pour décrocher ton alternance, réunis au même endroit.
+          Toutes les offres, les entreprises à contacter et les outils nécessaires pour décrocher ton alternance, réunis au même endroit. Cherche tout de suite, crée un compte seulement si tu veux tout retrouver.
         </p>
         <div className="mx-auto mt-10 max-w-3xl animate-fade-up [animation-delay:160ms]">
           <SearchBar />
@@ -29,8 +29,8 @@ export function Hero({ stats }: { stats: { jobs: number; companies: number; citi
             </Link>
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link href="/register">
-              Créer mon assistant <ArrowRight aria-hidden />
+            <Link href="/radar">
+              <Radar aria-hidden /> Ouvrir le Radar
             </Link>
           </Button>
         </div>

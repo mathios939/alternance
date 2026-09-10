@@ -54,6 +54,49 @@ export async function toggleFavorite(input: ToggleFavoriteInput): Promise<Action
   });
 }
 
+const importSchema = z.object({
+  jobIds: z.array(z.string().min(1).max(64)).max(100).default([]),
+  companyIds: z.array(z.string().min(1).max(64)).max(100).default([]),
+});
+
+export type ImportGuestFavoritesInput = z.input<typeof importSchema>;
+
+/**
+ * Importe dans le compte les favoris sauvegardés sans compte (identifiants conservés par le navigateur).
+ * Les identifiants inconnus ou déjà présents sont ignorés ; rien n'est supprimé.
+ */
+export async function importGuestFavorites(input: ImportGuestFavoritesInput): Promise<ActionResult<{ imported: number }>> {
+  return runAction("importGuestFavorites", async () => {
+    const userId = await requireUserId();
+    const parsed = parseInput(importSchema, input);
+    if (!parsed.ok) return parsed.result;
+    const { jobIds, companyIds } = parsed.data;
+    const [jobs, companies, existing] = await Promise.all([
+      jobIds.length ? prisma.job.findMany({ where: { id: { in: jobIds } }, select: { id: true, title: true, companyId: true } }) : [],
+      companyIds.length ? prisma.company.findMany({ where: { id: { in: companyIds }, isPlaceholder: false }, select: { id: true, name: true } }) : [],
+      prisma.favorite.findMany({ where: { userId, OR: [{ jobId: { in: jobIds } }, { companyId: { in: companyIds } }] }, select: { jobId: true, companyId: true } }),
+    ]);
+    const hasJob = new Set(existing.map((f) => f.jobId).filter(Boolean));
+    const hasCompany = new Set(existing.map((f) => f.companyId).filter(Boolean));
+    let imported = 0;
+    for (const job of jobs) {
+      if (hasJob.has(job.id)) continue;
+      await prisma.favorite.create({ data: { userId, jobId: job.id, collection: "TO_APPLY" } });
+      await trackActivity({ userId, type: "JOB_SAVED", title: `Offre sauvegardée : ${job.title}`, jobId: job.id, companyId: job.companyId });
+      imported++;
+    }
+    for (const company of companies) {
+      if (hasCompany.has(company.id)) continue;
+      await prisma.favorite.create({ data: { userId, companyId: company.id, collection: "COMPANIES" } });
+      await trackActivity({ userId, type: "JOB_SAVED", title: `Entreprise sauvegardée : ${company.name}`, companyId: company.id });
+      imported++;
+    }
+    revalidatePath("/favorites");
+    revalidatePath("/dashboard");
+    return ok({ imported });
+  });
+}
+
 export async function updateFavoriteNote(favoriteId: string, note: string): Promise<ActionResult> {
   return runAction("updateFavoriteNote", async () => {
     const userId = await requireUserId();

@@ -28,7 +28,7 @@ export default async function HomePage() {
       <KeyFigures stats={stats} />
       <HowItWorks />
       <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
-        <SectionHeading title="Offres récentes" description="Les dernières alternances publiées. Connecte-toi pour voir ton score de compatibilité." href="/jobs" hrefLabel="Toutes les offres" />
+        <SectionHeading title="Offres récentes" description="Les dernières alternances publiées. Personnalise tes résultats en 30 secondes, sans compte, pour voir ton score de compatibilité." href="/jobs" hrefLabel="Toutes les offres" />
         <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {jobs.map((job) => (
             <JobCard key={job.id} job={job} isAuthenticated={isAuthenticated} />

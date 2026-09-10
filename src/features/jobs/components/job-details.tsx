@@ -13,6 +13,7 @@ import { JobProvenance } from "./job-provenance";
 import { CompanyLogo } from "./job-card";
 import { MatchScoreBreakdown } from "./match-score";
 import { JobActions } from "./job-actions";
+import { PersonalizeResults } from "@/features/guest/components/personalize-results";
 
 function Fact({ icon: Icon, label, value }: { icon: typeof Clock; label: string; value: React.ReactNode }) {
   return (
@@ -26,7 +27,9 @@ function Fact({ icon: Icon, label, value }: { icon: typeof Clock; label: string;
   );
 }
 
-export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: JobDetailData; isAuthenticated: boolean; layout?: "pane" | "page" }) {
+type Props = { job: JobDetailData; isAuthenticated: boolean; /** Un profil (compte ou visiteur) permet le score ; sinon on propose de personnaliser sans compte. */ hasProfile?: boolean; layout?: "pane" | "page" };
+
+export function JobDetails({ job, isAuthenticated, hasProfile = Boolean(job.match), layout = "pane" }: Props) {
   const salary = formatSalary(job.salaryMin, job.salaryMax);
   const sector = SECTORS[job.sector as SectorKey];
   const paragraphs = job.description.split(/\n{2,}/).filter(Boolean);
@@ -100,6 +103,14 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
         {job.match && !isPage ? (
           <section className="surface p-4" aria-label="Compatibilité">
             <MatchScoreBreakdown match={job.match} compact />
+          </section>
+        ) : !isPage && !isAuthenticated ? (
+          <section className="surface flex flex-wrap items-center gap-3 p-4 text-sm" aria-label="Compatibilité">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Ton score de compatibilité</p>
+              <p className="text-muted-foreground">Formation, ville, compétences : 30 secondes, sans compte.</p>
+            </div>
+            <PersonalizeResults hasProfile={hasProfile} initialCity={job.city} />
           </section>
         ) : null}
 
@@ -184,12 +195,23 @@ export function JobDetails({ job, isAuthenticated, layout = "pane" }: { job: Job
             <div className="surface p-4">
               <MatchScoreBreakdown match={job.match} />
             </div>
+          ) : !isAuthenticated ? (
+            <div className="surface p-4 text-sm">
+              <p className="font-medium">Ton score de compatibilité</p>
+              <p className="mt-1 text-muted-foreground">Indique ta formation, ta ville et tes compétences pour savoir en 5 secondes si cette offre te correspond, et ce qu'il te manque. Sans compte.</p>
+              <div className="mt-3">
+                <PersonalizeResults hasProfile={hasProfile} initialCity={job.city} size="default" />
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                <Link href={`/register?next=/jobs/${job.slug}`} className="font-medium text-primary hover:underline">Crée un compte</Link> pour garder ton profil sur tous tes appareils.
+              </p>
+            </div>
           ) : (
             <div className="surface p-4 text-sm">
               <p className="font-medium">Ton score de compatibilité</p>
-              <p className="mt-1 text-muted-foreground">Crée un profil pour savoir en 5 secondes si cette offre te correspond, et ce qu'il te manque.</p>
-              <Link href={`/register?next=/jobs/${job.slug}`} className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
-                Créer mon profil gratuit →
+              <p className="mt-1 text-muted-foreground">Complète ton profil pour savoir en 5 secondes si cette offre te correspond, et ce qu'il te manque.</p>
+              <Link href="/onboarding" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
+                Compléter mon profil →
               </Link>
             </div>
           )}

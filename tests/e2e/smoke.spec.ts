@@ -1,18 +1,33 @@
 import { expect, test } from "@playwright/test";
 import { DEMO, login, resetDemoDocuments } from "./helpers";
 
-test.describe("pages publiques", () => {
-  test("accueil, offres, entreprises et pages SEO répondent", async ({ page }) => {
+test.describe("pages publiques (sans compte)", () => {
+  test("accueil, offres, entreprises, radar, carte, comparateur, favoris, sources et pages SEO répondent sans connexion", async ({ page }) => {
+    test.setTimeout(300_000);
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Trouve ton alternance");
     await page.goto("/jobs");
     await expect(page.getByRole("heading", { level: 3 }).first()).toBeVisible();
-    await page.goto("/companies");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("entreprise");
-    await page.goto("/alternance/nantes");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Nantes");
-    await page.goto("/confidentialite");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("confidentialité");
+    for (const [path, heading] of [
+      ["/companies", "entreprise"],
+      ["/radar", "même sans offre publiée"],
+      ["/map", "Carte"],
+      ["/compare", "Comparateur"],
+      ["/favorites", "Favoris"],
+      ["/dashboard", "Ton espace personnel"],
+      ["/sources", "D'où viennent les données"],
+      ["/alternance/nantes", "Nantes"],
+      ["/confidentialite", "confidentialité"],
+    ] as const) {
+      await page.goto(path);
+      await expect(page, path).not.toHaveURL(/\/login|\/register/);
+      await expect(page.getByRole("heading", { level: 1 }).first(), path).toContainText(heading, { timeout: 60_000 });
+    }
+  });
+
+  test("les fonctionnalités privées renvoient vers la connexion en conservant la destination", async ({ page }) => {
+    await page.goto("/applications");
+    await expect(page).toHaveURL(/\/login\?next=%2Fapplications/);
   });
 });
 

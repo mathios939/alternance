@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, Briefcase, Building2, CalendarClock, KanbanSquare, RefreshCw, Sparkles, UserRound } from "lucide-react";
-import { requireUser } from "@/lib/auth/session";
+import { getSession, requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/features/dashboard/server/queries";
+import { GuestDashboard } from "@/features/guest/components/guest-dashboard";
 import { formatDateTime } from "@/lib/format";
 import { PageContainer } from "@/components/layout/app-shell";
 import { StatCard } from "@/components/shared/stat-card";
@@ -24,7 +25,9 @@ function greeting(): string {
   return h < 5 ? "Bonne nuit" : h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
 }
 
+/** Tableau de bord : réservé aux comptes, mais un visiteur voit une explication (jamais une redirection brutale). */
 export default async function DashboardPage() {
+  if (!(await getSession())) return <GuestDashboard />;
   const user = await requireUser();
   const data = await getDashboardData(user.id);
   if (!data) redirect("/onboarding");

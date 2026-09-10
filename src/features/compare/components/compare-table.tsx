@@ -34,7 +34,7 @@ export function CompareTable({ initialIds }: { initialIds: string[] }) {
 
   const items = !key ? [] : state?.key === key ? state.items : null;
   if (items === null) return <Skeleton className="h-96 rounded-xl" />;
-  if (items.length === 0) return <EmptyState icon={GitCompare} title="Aucune offre à comparer" description="Depuis une offre, clique sur « Comparer » (jusqu'à 4 offres)." action={<Button asChild><Link href="/jobs?sort=match">Voir mes offres</Link></Button>} />;
+  if (items.length === 0) return <EmptyState icon={GitCompare} title="Aucune offre à comparer" description="Depuis une offre, clique sur « Comparer » (jusqu'à 4 offres)." action={<Button asChild><Link href="/jobs">Voir les offres</Link></Button>} />;
 
   const best = (values: Array<number | null>, higher = true) => {
     const nums = values.filter((v): v is number => v !== null);
@@ -46,7 +46,7 @@ export function CompareTable({ initialIds }: { initialIds: string[] }) {
   const bestDistance = best(items.map((j) => j.distanceKm), false);
 
   const rows: Array<{ label: string; render: (j: JobCardData) => React.ReactNode }> = [
-    { label: "Compatibilité", render: (j) => (j.match ? <span className={cn("font-semibold tabular-nums", j.match.total === bestMatch && "text-success")}>{j.match.total} %</span> : <span className="text-muted-foreground">Crée ton profil</span>) },
+    { label: "Compatibilité", render: (j) => (j.match ? <span className={cn("font-semibold tabular-nums", j.match.total === bestMatch && "text-success")}>{j.match.total} %</span> : <span className="text-muted-foreground">Personnalise tes résultats</span>) },
     { label: "Salaire", render: (j) => <span className={cn((j.salaryMax ?? j.salaryMin) === bestSalary && "font-semibold text-success")}>{formatSalary(j.salaryMin, j.salaryMax) ?? "Grille légale"}</span> },
     { label: "Distance", render: (j) => (j.distanceKm !== null ? <span className={cn(j.distanceKm === bestDistance && "font-semibold text-success")}>{formatDistanceKm(j.distanceKm)}</span> : <span className="text-muted-foreground">—</span>) },
     { label: "Télétravail", render: (j) => REMOTE_POLICIES[j.remote].label },

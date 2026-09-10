@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { getSession } from "@/lib/auth/session";
-import { getCandidateContext } from "@/features/profile/server/queries";
+import { getVisitorContext } from "@/features/profile/server/visitor";
 import { searchJobs } from "@/features/jobs/server/queries";
 import { countActiveFilters, jobFiltersSchema } from "@/features/jobs/lib/filters";
 import { parseNaturalQuery } from "@/features/jobs/lib/query-parser";
@@ -8,9 +7,10 @@ import { JobsExplorer } from "@/features/jobs/components/jobs-explorer";
 
 export const metadata: Metadata = {
   title: "Offres d'alternance",
-  description: "Toutes les offres d'alternance en France, dédoublonnées, filtrables par ville, rayon, niveau, rythme et télétravail, avec score de compatibilité.",
+  description: "Toutes les offres d'alternance en France, dédoublonnées, filtrables par ville, rayon, niveau, rythme et télétravail, avec score de compatibilité. Recherche sans compte.",
 };
 
+/** Recherche d'offres : accessible sans compte. Les scores utilisent le profil du compte ou le profil visiteur. */
 export default async function JobsPage(props: PageProps<"/jobs">) {
   const params = await props.searchParams;
   const flat = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]));
@@ -36,18 +36,18 @@ export default async function JobsPage(props: PageProps<"/jobs">) {
     }
   }
 
-  const session = await getSession();
-  const ctx = session ? await getCandidateContext(session.id) : null;
-  const result = await searchJobs(filters, { userId: session?.id, candidate: ctx?.candidate ?? null });
+  const visitor = await getVisitorContext();
+  const result = await searchJobs(filters, { userId: visitor.userId, candidate: visitor.candidate });
 
   return (
     <JobsExplorer
       result={{ ...result, interpretation }}
-      isAuthenticated={Boolean(session)}
-      hasProfile={Boolean(ctx)}
+      isAuthenticated={visitor.isAuthenticated}
+      hasProfile={visitor.hasProfile}
       activeFilters={countActiveFilters(filters)}
       initialQuery={filters.q}
       initialCity={filters.city}
+      initialRadius={filters.radius}
     />
   );
 }

@@ -54,9 +54,10 @@ export const FOOTER_NAV: NavItem[] = [
 
 export const ADMIN_NAV: NavItem = { label: "Administration", href: "/admin", icon: Shield };
 
+/** Navigation sans compte : tout le cœur du site, aucune entrée n'exige de se connecter. */
 export const PUBLIC_NAV = [
   { label: "Offres", href: "/jobs" },
   { label: "Entreprises", href: "/companies" },
-  { label: "Villes", href: "/alternance/nantes" },
-  { label: "Fonctionnalités", href: "/#fonctionnalites" },
+  { label: "Radar", href: "/radar" },
+  { label: "Carte", href: "/map" },
 ];

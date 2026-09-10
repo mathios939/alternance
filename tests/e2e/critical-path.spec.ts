@@ -25,10 +25,10 @@ test("un nouvel utilisateur trouve, sauvegarde, candidate et se voit proposer un
   // Le même parcours est joué sur desktop (3 colonnes) et sur mobile (liste → détail plein écran → retour liste).
   test.setTimeout(300_000);
 
-  // 1. Accueil
+  // 1. Accueil : le compte est proposé (en-tête sur desktop, appel final sur mobile), jamais imposé
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Trouve ton alternance");
-  await page.getByRole("link", { name: "Commencer gratuitement" }).first().click();
+  await page.locator('a[href="/register"]:visible').first().click();
 
   // 2. Inscription
   await expect(page).toHaveURL(/\/register/);

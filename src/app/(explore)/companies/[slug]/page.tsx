@@ -4,11 +4,10 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Briefcase, Building2, ExternalLink, Globe, GraduationCap, MapPin, Users, Calendar, Cpu } from "lucide-react";
 import { siteConfig } from "@/config/site";
 import { COMPANY_SIZES, JOB_FAMILIES, SECTORS, type JobFamilyKey, type SectorKey } from "@/config/taxonomy";
-import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { recommendBestContact, recommendContactRole } from "@/lib/matching";
 import { CompanyProvenance } from "@/features/companies/components/company-provenance";
-import { getCandidateContext } from "@/features/profile/server/queries";
+import { getVisitorContext } from "@/features/profile/server/visitor";
 import { getCompanyBySlug, getSimilarCompanies, toCompanyCard } from "@/features/companies/server/queries";
 import { toJobCard } from "@/features/jobs/server/queries";
 import { JobCard } from "@/features/jobs/components/job-card";
@@ -42,12 +41,13 @@ function buildAngle(company: { name: string; size: string; technologies: string[
   return `${company.name} n'a pas d'offre publiée : propose une mission concrète que tu pourrais prendre en charge, plutôt qu'une demande générique.`;
 }
 
+/** Fiche entreprise : accessible sans compte ; le potentiel estimé utilise le profil du compte ou le profil visiteur. */
 export default async function CompanyPage(props: PageProps<"/companies/[slug]">) {
   const { slug } = await props.params;
-  const [session, company] = await Promise.all([getSession(), getCompanyBySlug(slug)]);
+  const [visitor, company] = await Promise.all([getVisitorContext(), getCompanyBySlug(slug)]);
   if (!company) notFound();
-  const ctx = session ? await getCandidateContext(session.id) : null;
-  const userCtx = { userId: session?.id, candidate: ctx?.candidate ?? null };
+  const { session, candidate } = visitor;
+  const userCtx = { userId: session?.id, candidate };
   const [similar, favorite, application, resume] = await Promise.all([
     getSimilarCompanies(company, userCtx),
     session ? prisma.favorite.findFirst({ where: { userId: session.id, companyId: company.id } }) : null,
@@ -59,10 +59,10 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
   const [favs, apps] = session ? await Promise.all([prisma.favorite.findMany({ where: { userId: session.id, jobId: { in: jobIds } } }), prisma.application.findMany({ where: { userId: session.id, jobId: { in: jobIds }, archivedAt: null } })]) : [[], []];
   const enrichment = { favorites: new Map(favs.map((f) => [f.jobId!, f.collection])), applications: new Map(apps.map((a) => [a.jobId!, { id: a.id, status: a.status }])) };
   const jobs = company.jobs.map((j) => toJobCard(j, userCtx, enrichment));
-  const recommendation = recommendBestContact(company, { jobFamily: ctx?.profile.jobFamily ?? null }, company.contacts);
-  const roleFallback = recommendation ? null : recommendContactRole(company, { jobFamily: ctx?.profile.jobFamily ?? null }, { postingUrl: company.jobs[0]?.applicationUrl ?? null });
+  const recommendation = recommendBestContact(company, { jobFamily: candidate?.jobFamily ?? null }, company.contacts);
+  const roleFallback = recommendation ? null : recommendContactRole(company, { jobFamily: candidate?.jobFamily ?? null }, { postingUrl: company.jobs[0]?.applicationUrl ?? null });
   const sector = SECTORS[company.sector as SectorKey];
-  const angle = buildAngle(company, ctx ? { targetJobTitle: ctx.profile.targetJobTitle, skills: ctx.candidate.skills } : null);
+  const angle = buildAngle(company, candidate ? { targetJobTitle: candidate.targetJobTitle, skills: candidate.skills } : null);
 
   return (
     <PageContainer className="space-y-8">
@@ -200,11 +200,11 @@ export default async function CompanyPage(props: PageProps<"/companies/[slug]">)
               <p className="inline-flex items-center gap-2 text-sm font-semibold"><Cpu className="size-4 text-muted-foreground" aria-hidden /> Technologies & outils</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {company.technologies.map((t) => {
-                  const known = ctx?.candidate.skills.includes(t);
+                  const known = candidate?.skills.includes(t);
                   return <Badge key={t} variant={known ? "success" : "muted"} className="font-normal capitalize">{t.replace(/-/g, " ")}</Badge>;
                 })}
               </div>
-              {ctx ? <p className="mt-2 text-[11px] text-muted-foreground">En vert : dans ton profil.</p> : null}
+              {candidate ? <p className="mt-2 text-[11px] text-muted-foreground">En vert : dans ton profil.</p> : null}
             </div>
           ) : null}
           <div className="surface p-4">

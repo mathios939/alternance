@@ -1,5 +1,6 @@
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
+import { GuestImportBanner } from "@/features/favorites/components/guest-import-banner";
 import { getRecentNotifications, getUnreadCounts } from "@/features/notifications/server/queries";
 import { prisma } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth/session";
@@ -17,6 +18,7 @@ export async function AppShell({ user, children }: { user: SessionUser; children
       <AppSidebar badges={counts} isAdmin={isAdmin} urgencyMode={urgencyMode} />
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader user={{ name: user.name, email: user.email, image: user.image, role: user.role, plan: user.plan }} badges={counts} notifications={notifications} urgencyMode={urgencyMode} isAdmin={isAdmin} />
+        <GuestImportBanner />
         <main id="main" className="flex-1">
           {children}
         </main>

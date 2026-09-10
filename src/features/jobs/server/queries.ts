@@ -134,6 +134,7 @@ export function toJobCard(job: JobWithCard, ctx: UserContext, enrichment?: Enric
     sourceLabel: SOURCE_LABELS[job.source] ?? job.source,
     sourceCount: Math.max(1, job._count.sourceEntries),
     company: { id: job.company.id, slug: job.company.slug, name: job.company.name, logoUrl: job.company.logoUrl, size: job.company.size, sector: job.company.sector, isPlaceholder: job.company.isPlaceholder },
+    applicationUrl: job.applicationUrl,
     match,
     distanceKm,
     priority,

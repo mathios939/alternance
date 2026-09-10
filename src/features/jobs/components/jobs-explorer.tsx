@@ -16,26 +16,33 @@ import { JobCard } from "./job-card";
 import { JobDetails } from "./job-details";
 import { MobileFiltersSheet, SearchFiltersPanel, useJobFilters } from "./search-filters";
 import { SearchBar } from "./search-bar";
+import { PersonalizeResults } from "@/features/guest/components/personalize-results";
+import { useGuestProfile } from "@/lib/guest/use-guest-profile";
 
-type Props = { result: JobSearchResult; isAuthenticated: boolean; hasProfile: boolean; activeFilters: number; initialQuery: string; initialCity: string };
+type Props = { result: JobSearchResult; isAuthenticated: boolean; hasProfile: boolean; activeFilters: number; initialQuery: string; initialCity: string; initialRadius?: number };
 
 type DetailState = { key: string; data: JobDetailData | null; error: string | null };
 
-/** Cache mémoire des fiches consultées (borné), partagé entre navigations. */
+/** Cache mémoire des fiches consultées (borné), partagé entre navigations. Clé : slug + version du profil visiteur. */
 const detailCache = new Map<string, JobDetailData>();
-function remember(slug: string, job: JobDetailData) {
+function remember(cacheKey: string, job: JobDetailData) {
   if (detailCache.size >= 200) detailCache.delete(detailCache.keys().next().value as string);
-  detailCache.set(slug, job);
+  detailCache.set(cacheKey, job);
 }
 
-function useJobDetail(slug: string | null) {
+/**
+ * Détail d'une offre. `version` change quand le profil visiteur est modifié : la fiche est alors
+ * rechargée pour afficher le nouveau score (sans compte, le score dépend du cookie de préférences).
+ */
+function useJobDetail(slug: string | null, version: string) {
+  const cacheKey = slug ? `${slug}|${version}` : null;
   const [state, setState] = useState<DetailState | null>(null);
   const [nonce, setNonce] = useState(0);
-  const key = slug ? `${slug}:${nonce}` : "";
-  const cached = slug ? (detailCache.get(slug) ?? null) : null;
+  const key = cacheKey ? `${cacheKey}:${nonce}` : "";
+  const cached = cacheKey ? (detailCache.get(cacheKey) ?? null) : null;
 
   useEffect(() => {
-    if (!slug || detailCache.has(slug)) return;
+    if (!slug || !cacheKey || detailCache.has(cacheKey)) return;
     const ctrl = new AbortController();
     fetch(`/api/jobs/${slug}`, { signal: ctrl.signal })
       .then(async (r) => {
@@ -43,19 +50,19 @@ function useJobDetail(slug: string | null) {
         return (await r.json()) as JobDetailData;
       })
       .then((j) => {
-        remember(slug, j);
+        remember(cacheKey, j);
         setState({ key, data: j, error: null });
       })
       .catch((e: Error) => {
         if (e.name !== "AbortError") setState({ key, data: null, error: e.message });
       });
     return () => ctrl.abort();
-  }, [slug, key]);
+  }, [slug, cacheKey, key]);
 
   const data = cached ?? (state?.key === key ? state.data : null);
   const error = !cached && state?.key === key ? state.error : null;
   const loading = Boolean(slug) && !data && !error;
-  return { data, loading, error, retry: () => { if (slug) detailCache.delete(slug); setNonce((n) => n + 1); } };
+  return { data, loading, error, retry: () => { if (cacheKey) detailCache.delete(cacheKey); setNonce((n) => n + 1); } };
 }
 
 const desktopQuery = "(min-width: 1024px)";
@@ -65,13 +72,14 @@ function subscribeDesktop(cb: () => void) {
   return () => mq.removeEventListener("change", cb);
 }
 
-export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilters, initialQuery, initialCity }: Props) {
+export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilters, initialQuery, initialCity, initialRadius }: Props) {
   const { filters, setFilters, pending } = useJobFilters();
   const [selectedSlug, setSelectedSlug] = useQueryState("job", parseAsString);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isDesktop = useSyncExternalStore(subscribeDesktop, () => window.matchMedia(desktopQuery).matches, () => true);
   const effectiveSlug = selectedSlug ?? (isDesktop ? (result.items[0]?.slug ?? null) : null);
-  const detail = useJobDetail(effectiveSlug);
+  const { profile: guestProfile } = useGuestProfile();
+  const detail = useJobDetail(effectiveSlug, isAuthenticated ? "" : (guestProfile?.updatedAt ?? ""));
 
   function select(job: JobCardData) {
     void setSelectedSlug(job.slug);
@@ -84,7 +92,7 @@ export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilter
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6">
       <div className="mb-5 max-w-3xl">
-        <SearchBar size="md" initialQuery={initialQuery} initialCity={initialCity} />
+        <SearchBar size="md" initialQuery={initialQuery} initialCity={initialCity} initialRadius={initialRadius} />
         {result.interpretation?.length ? (
           <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <Sparkles className="size-3.5 text-primary" aria-hidden /> Compris : {result.interpretation.join(" · ")}
@@ -105,7 +113,8 @@ export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilter
               {pending ? <Loader2 className="mr-1 inline size-3.5 animate-spin" aria-hidden /> : null}
               {result.total === 0 ? "Aucune offre" : `${showingFrom}–${showingTo} sur ${result.total} offre${result.total > 1 ? "s" : ""}`}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {!isAuthenticated ? <PersonalizeResults hasProfile={hasProfile} initialCity={initialCity} initialQuery={initialQuery} initialRadius={initialRadius} /> : null}
               <MobileFiltersSheet hasProfile={hasProfile} activeCount={activeFilters} />
               <Select value={filters.sort} onValueChange={(v) => setFilters({ sort: v as typeof filters.sort, page: null })}>
                 <SelectTrigger size="sm" className="w-[170px]" aria-label="Trier">
@@ -156,7 +165,7 @@ export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilter
               <DetailSkeleton />
             ) : (
               <>
-                <JobDetails job={detail.data} isAuthenticated={isAuthenticated} />
+                <JobDetails job={detail.data} isAuthenticated={isAuthenticated} hasProfile={hasProfile} />
                 <div className="mt-6 border-t pt-4">
                   <Button asChild variant="ghost" size="sm">
                     <a href={`/jobs/${detail.data.slug}`}>
@@ -177,7 +186,7 @@ export function JobsExplorer({ result, isAuthenticated, hasProfile, activeFilter
             <Button variant="ghost" size="sm" className="mb-3 -ml-2" onClick={() => setMobileOpen(false)}>
               <ArrowLeft /> Retour aux résultats
             </Button>
-            {detail.error ? <ErrorState description={detail.error} onRetry={detail.retry} /> : detail.loading || !detail.data ? <DetailSkeleton /> : <JobDetails job={detail.data} isAuthenticated={isAuthenticated} />}
+            {detail.error ? <ErrorState description={detail.error} onRetry={detail.retry} /> : detail.loading || !detail.data ? <DetailSkeleton /> : <JobDetails job={detail.data} isAuthenticated={isAuthenticated} hasProfile={hasProfile} />}
           </div>
         </SheetContent>
       </Sheet>

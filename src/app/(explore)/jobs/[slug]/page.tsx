@@ -3,8 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { siteConfig } from "@/config/site";
-import { getSession } from "@/lib/auth/session";
-import { getCandidateContext } from "@/features/profile/server/queries";
+import { getVisitorContext } from "@/features/profile/server/visitor";
 import { getJobBySlug, getJobDetail, incrementJobView } from "@/features/jobs/server/queries";
 import { buildJobPostingJsonLd } from "@/features/seo/job-posting-jsonld";
 import { JobDetails } from "@/features/jobs/components/job-details";
@@ -25,12 +24,12 @@ export async function generateMetadata(props: PageProps<"/jobs/[slug]">): Promis
   };
 }
 
+/** Fiche offre : accessible sans compte, candidature via le lien officiel sans inscription. */
 export default async function JobPage(props: PageProps<"/jobs/[slug]">) {
   const { slug } = await props.params;
-  const [session, raw] = await Promise.all([getSession(), getJobBySlug(slug)]);
+  const [visitor, raw] = await Promise.all([getVisitorContext(), getJobBySlug(slug)]);
   if (!raw) notFound();
-  const ctx = session ? await getCandidateContext(session.id) : null;
-  const job = await getJobDetail(slug, { userId: session?.id, candidate: ctx?.candidate ?? null, profile: ctx?.profile ?? null });
+  const job = await getJobDetail(slug, { userId: visitor.userId, candidate: visitor.candidate, profile: visitor.ctx?.profile ?? null });
   if (!job) notFound();
   void incrementJobView(job.id);
   const jsonLd = raw.isDemo ? null : buildJobPostingJsonLd(raw);
@@ -40,7 +39,7 @@ export default async function JobPage(props: PageProps<"/jobs/[slug]">) {
       <Link href="/jobs" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> Toutes les offres
       </Link>
-      <JobDetails job={job} isAuthenticated={Boolean(session)} layout="page" />
+      <JobDetails job={job} isAuthenticated={visitor.isAuthenticated} hasProfile={visitor.hasProfile} layout="page" />
     </PageContainer>
   );
 }

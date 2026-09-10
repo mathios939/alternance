@@ -2,19 +2,22 @@
 
 import { useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MapPin, ArrowRight, Sparkles } from "lucide-react";
+import { Search, MapPin, ArrowRight, Ruler, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SEARCH_EXAMPLES } from "@/config/taxonomy";
+import { RADIUS_OPTIONS, SEARCH_EXAMPLES } from "@/config/taxonomy";
 import { searchCities, type City } from "@/config/cities";
 import { Button } from "@/components/ui/button";
 
-type Props = { size?: "lg" | "md"; initialQuery?: string; initialCity?: string; className?: string; autoFocus?: boolean };
+type Props = { size?: "lg" | "md"; initialQuery?: string; initialCity?: string; initialRadius?: number; className?: string; autoFocus?: boolean };
 
-/** Barre de recherche principale : métier / compétence / formation + ville ou région. */
-export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", className, autoFocus }: Props) {
+const DEFAULT_RADIUS = 30;
+
+/** Barre de recherche principale : métier / formation / compétence + ville + rayon. Utilisable sans compte. */
+export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", initialRadius, className, autoFocus }: Props) {
   const router = useRouter();
   const [q, setQ] = useState(initialQuery);
   const [city, setCity] = useState(initialCity);
+  const [radius, setRadius] = useState<number>(initialRadius && (RADIUS_OPTIONS as readonly number[]).includes(initialRadius) ? initialRadius : DEFAULT_RADIUS);
   const suggestions = useMemo<City[]>(() => searchCities(city), [city]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -25,7 +28,10 @@ export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", cl
     e?.preventDefault();
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
-    if (city.trim()) params.set("city", city.trim());
+    if (city.trim()) {
+      params.set("city", city.trim());
+      params.set("radius", String(radius));
+    }
     router.push(`/jobs${params.size ? `?${params}` : ""}`);
   }
 
@@ -40,14 +46,14 @@ export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", cl
     <div className={cn("w-full", className)}>
       <form onSubmit={submit} role="search" aria-label="Rechercher une alternance" className={cn("flex flex-col gap-2 rounded-2xl border bg-card p-2 shadow-lg shadow-black/5 sm:flex-row sm:items-center", big ? "sm:p-2.5" : "")}>
         <label className="relative flex flex-1 items-center">
-          <span className="sr-only">Métier, compétence ou formation</span>
+          <span className="sr-only">Métier, formation ou compétence</span>
           <Search className="pointer-events-none absolute left-3.5 size-4 text-muted-foreground" aria-hidden />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Métier, compétence ou formation" autoFocus={autoFocus} className={cn("w-full rounded-xl bg-transparent pr-3 pl-10 outline-none placeholder:text-muted-foreground focus:bg-accent/60", big ? "h-12 text-base" : "h-10 text-sm")} autoComplete="off" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Métier, formation ou compétence" autoFocus={autoFocus} className={cn("w-full rounded-xl bg-transparent pr-3 pl-10 outline-none placeholder:text-muted-foreground focus:bg-accent/60", big ? "h-12 text-base" : "h-10 text-sm")} autoComplete="off" />
         </label>
         <div className="hidden h-8 w-px bg-border sm:block" aria-hidden />
         <div className="relative flex-1">
           <label className="relative flex items-center">
-            <span className="sr-only">Ville ou région</span>
+            <span className="sr-only">Ville</span>
             <MapPin className="pointer-events-none absolute left-3.5 size-4 text-muted-foreground" aria-hidden />
             <input
               ref={cityRef}
@@ -62,7 +68,7 @@ export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", cl
                 if (e.key === "Enter" && active >= 0 && suggestions[active]) { e.preventDefault(); choose(suggestions[active]); }
                 if (e.key === "Escape") setOpen(false);
               }}
-              placeholder="Ville ou région"
+              placeholder="Ville"
               role="combobox"
               aria-expanded={open}
               aria-controls={listId}
@@ -83,10 +89,23 @@ export function SearchBar({ size = "lg", initialQuery = "", initialCity = "", cl
             </ul>
           ) : null}
         </div>
+        <div className="hidden h-8 w-px bg-border sm:block" aria-hidden />
+        <label className="relative flex items-center sm:w-32 sm:shrink-0">
+          <span className="sr-only">Rayon</span>
+          <Ruler className="pointer-events-none absolute left-3.5 size-4 text-muted-foreground" aria-hidden />
+          <select value={radius} onChange={(e) => setRadius(Number(e.target.value))} aria-label="Rayon" className={cn("w-full cursor-pointer appearance-none rounded-xl bg-transparent pr-3 pl-10 outline-none focus:bg-accent/60", big ? "h-12 text-base" : "h-10 text-sm")}>
+            {RADIUS_OPTIONS.map((r) => (
+              <option key={r} value={r}>
+                {r} km
+              </option>
+            ))}
+          </select>
+        </label>
         <Button type="submit" size={big ? "lg" : "default"} className="sm:shrink-0">
           Trouver mon alternance <ArrowRight aria-hidden />
         </Button>
       </form>
+      {big ? <p className="mt-3 text-center text-sm text-muted-foreground">Aucun compte nécessaire pour rechercher.</p> : null}
       {big ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Sparkles className="size-3.5" aria-hidden /> Exemples :

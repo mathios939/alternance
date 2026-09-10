@@ -213,3 +213,29 @@ export const SKILL_CATALOG: SkillDefinition[] = [
   { name: "Portugais", category: "LANGUAGE" },
   { name: "Arabe", category: "LANGUAGE" },
 ];
+
+/** Suggestions rapides par famille de métier (onboarding et profil visiteur). */
+export const FAMILY_SKILL_SUGGESTIONS: Record<string, string[]> = {
+  dev: ["JavaScript", "React", "Node.js", "SQL", "Git", "PHP", "Java", "Python"],
+  data: ["SQL", "Python", "Power BI", "Excel", "Pandas", "Machine Learning"],
+  cyber: ["Linux", "Réseaux", "Cybersécurité", "Python", "SIEM", "Pentest"],
+  infra: ["Linux", "Windows Server", "Réseaux", "Active Directory", "Docker", "Support utilisateur"],
+  marketing: ["SEO", "Social media", "Canva", "Google Analytics", "Emailing", "Content marketing"],
+  communication: ["Communication", "Rédaction", "Canva", "Social media", "Événementiel"],
+  sales: ["Prospection", "Négociation", "CRM", "Relation client", "Vente"],
+  hr: ["Recrutement", "Pack Office", "Administration du personnel", "SIRH"],
+  finance: ["Excel", "Contrôle de gestion", "Power BI", "Analyse financière"],
+  accounting: ["Comptabilité générale", "Excel", "Sage", "Facturation"],
+  design: ["Figma", "Adobe Photoshop", "Adobe Illustrator", "UX/UI Design"],
+  industrial: ["CAO", "Mécanique", "Automatisme", "Lean management"],
+  logistics: ["Supply chain", "Excel", "ERP", "Gestion des stocks"],
+  quality: ["Qualité", "Lean management", "Excel", "Audit"],
+  product: ["Agile", "Jira", "Product Management", "Figma"],
+  "customer-support": ["Relation client", "CRM", "Pack Office", "Communication orale"],
+  admin: ["Pack Office", "Gestion administrative", "Rédaction"],
+  "retail-ops": ["Vente", "Merchandising", "Relation client"],
+  project: ["Gestion de projet", "Agile", "Jira", "Pack Office"],
+  purchasing: ["Achats", "Négociation", "Excel", "Anglais"],
+  legal: ["Droit des affaires", "Conformité", "RGPD", "Rédaction"],
+  health: ["Rigueur", "Sens du service"],
+};

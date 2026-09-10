@@ -1,10 +1,10 @@
 "use client";
 
-import { useOptimistic, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Bookmark, BookmarkCheck, Building2, Clock, GraduationCap, MapPin, Send, Wifi, Check, ShieldCheck } from "lucide-react";
+import { Bookmark, BookmarkCheck, Building2, Clock, ExternalLink, GraduationCap, MapPin, Send, Wifi, Check, ShieldCheck } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { formatDistanceKm } from "@/lib/format";
 import { RelativeTime } from "@/components/shared/relative-time";
@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toggleFavorite } from "@/features/favorites/server/actions";
 import { createApplication } from "@/features/applications/server/actions";
+import { useGuestFavorites } from "@/lib/guest/use-guest-favorites";
+import { AccountPromptDialog } from "@/features/guest/components/account-prompt";
 import { MatchScoreRing } from "./match-score";
 
 type Props = {
@@ -40,21 +42,29 @@ export function CompanyLogo({ name, logoUrl, size = "md", className }: { name: s
   );
 }
 
+/**
+ * Carte d'offre. Sans compte : sauvegarde dans le navigateur et candidature via le lien officiel ;
+ * le suivi de candidature (Kanban) est proposé comme avantage du compte, jamais imposé.
+ */
 export function JobCard({ job, variant = "default", selected = false, onSelect, isAuthenticated = true, className }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [optimistic, setOptimistic] = useOptimistic({ isFavorite: job.isFavorite, applicationStatus: job.applicationStatus });
-
-  function requireAuth(): boolean {
-    if (isAuthenticated) return true;
-    router.push(`/register?next=${encodeURIComponent(`/jobs/${job.slug}`)}`);
-    return false;
-  }
+  const guest = useGuestFavorites();
+  const [prompt, setPrompt] = useState(false);
+  const href = `/jobs/${job.slug}`;
+  const isFavorite = isAuthenticated ? optimistic.isFavorite : guest.hasJob(job.id);
+  const officialUrl = !job.isDemo ? job.applicationUrl : null;
 
   function onSave(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!requireAuth()) return;
+    if (!isAuthenticated) {
+      const r = guest.toggleJob(job.id);
+      if (r.saved) toast.success("Sauvegardée dans ce navigateur", { description: "Crée un compte gratuitement pour la retrouver sur tous tes appareils.", action: { label: "Mes favoris", onClick: () => router.push("/favorites") } });
+      else toast.success("Retirée des favoris");
+      return;
+    }
     startTransition(async () => {
       setOptimistic((s) => ({ ...s, isFavorite: !s.isFavorite }));
       const result = await toggleFavorite({ jobId: job.id });
@@ -67,7 +77,10 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
   function onApply(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!requireAuth()) return;
+    if (!isAuthenticated) {
+      setPrompt(true);
+      return;
+    }
     startTransition(async () => {
       setOptimistic((s) => ({ ...s, applicationStatus: "TO_APPLY" }));
       const result = await createApplication({ jobId: job.id, matchScore: job.match?.total });
@@ -77,7 +90,6 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
     });
   }
 
-  const href = `/jobs/${job.slug}`;
   const isLarge = variant === "large";
   const isCompact = variant === "compact";
   const status = optimistic.applicationStatus;
@@ -145,17 +157,23 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
           </Button>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant={optimistic.isFavorite ? "soft" : "ghost"} size="sm" onClick={onSave} disabled={pending} aria-pressed={optimistic.isFavorite} aria-label={optimistic.isFavorite ? "Retirer des favoris" : "Sauvegarder"}>
-                {optimistic.isFavorite ? <BookmarkCheck /> : <Bookmark />}
-                <span className="hidden sm:inline">{optimistic.isFavorite ? "Sauvegardée" : "Sauvegarder"}</span>
+              <Button variant={isFavorite ? "soft" : "ghost"} size="sm" onClick={onSave} disabled={pending} aria-pressed={isFavorite} aria-label={isFavorite ? "Retirer des favoris" : "Sauvegarder"}>
+                {isFavorite ? <BookmarkCheck /> : <Bookmark />}
+                <span className="hidden sm:inline">{isFavorite ? "Sauvegardée" : "Sauvegarder"}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{optimistic.isFavorite ? "Retirer des favoris" : "Ajouter aux favoris"}</TooltipContent>
+            <TooltipContent>{isFavorite ? "Retirer des favoris" : isAuthenticated ? "Ajouter aux favoris" : "Sauvegarder dans ce navigateur"}</TooltipContent>
           </Tooltip>
           {status ? (
             <Badge variant={APPLICATION_STATUSES[status].tone === "destructive" ? "destructive" : APPLICATION_STATUSES[status].tone === "success" ? "success" : "soft"} className="ml-auto">
               {APPLICATION_STATUSES[status].label}
             </Badge>
+          ) : !isAuthenticated && officialUrl ? (
+            <Button asChild size="sm" className="ml-auto">
+              <a href={officialUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Candidater sur le site officiel : ${job.title}`}>
+                <Send /> Candidater <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
           ) : (
             <Button size="sm" className="ml-auto" onClick={onApply} disabled={pending}>
               <Send /> Candidater
@@ -174,17 +192,33 @@ export function JobCard({ job, variant = "default", selected = false, onSelect, 
     className,
   );
 
+  const dialog = !isAuthenticated ? (
+    <AccountPromptDialog
+      open={prompt}
+      onOpenChange={setPrompt}
+      title="Crée un compte gratuitement pour sauvegarder et suivre cette candidature."
+      description={officialUrl ? "Tu peux aussi candidater directement sur le site officiel, sans compte." : "Cette offre n'indique pas de lien de candidature : ouvre la fiche pour voir le canal publié par la source."}
+      next={href}
+    />
+  ) : null;
+
   if (onSelect) {
     return (
-      <article className={base} onClick={() => onSelect(job)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(job); } }} tabIndex={0} role="button" aria-pressed={selected} aria-label={`${job.title} chez ${job.company.name}`}>
-        {content}
-      </article>
+      <>
+        <article className={base} onClick={() => onSelect(job)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(job); } }} tabIndex={0} role="button" aria-pressed={selected} aria-label={`${job.title} chez ${job.company.name}`}>
+          {content}
+        </article>
+        {dialog}
+      </>
     );
   }
   return (
-    <article className={base}>
-      <Link href={href} className="absolute inset-0 rounded-xl" aria-label={`${job.title} chez ${job.company.name}`} />
-      <div className="pointer-events-none relative [&_a]:pointer-events-auto [&_button]:pointer-events-auto">{content}</div>
-    </article>
+    <>
+      <article className={base}>
+        <Link href={href} className="absolute inset-0 rounded-xl" aria-label={`${job.title} chez ${job.company.name}`} />
+        <div className="pointer-events-none relative [&_a]:pointer-events-auto [&_button]:pointer-events-auto">{content}</div>
+      </article>
+      {dialog}
+    </>
   );
 }

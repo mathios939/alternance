@@ -29,6 +29,8 @@ export type JobCardData = {
   sourceLabel: string;
   sourceCount: number;
   company: { id: string; slug: string; name: string; logoUrl: string | null; size: CompanySize; sector: string; isPlaceholder: boolean };
+  /** Lien de candidature officiel (site carrières, source) : utilisable sans compte. */
+  applicationUrl: string | null;
   match: MatchResult | null;
   distanceKm: number | null;
   priority: number | null;

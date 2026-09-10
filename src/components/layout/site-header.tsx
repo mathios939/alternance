@@ -20,7 +20,7 @@ export function SiteHeader({ isAuthenticated }: { isAuthenticated: boolean }) {
           <Logo />
           <nav className="hidden items-center gap-1 md:flex" aria-label="Navigation principale">
             {PUBLIC_NAV.map((item) => (
-              <Link key={item.href} href={item.href} className={cn("rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", pathname === item.href && "text-foreground")}>
+              <Link key={item.href} href={item.href} className={cn("rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", (pathname === item.href || pathname.startsWith(`${item.href}/`)) && "text-foreground")}>
                 {item.label}
               </Link>
             ))}
@@ -39,8 +39,8 @@ export function SiteHeader({ isAuthenticated }: { isAuthenticated: boolean }) {
               <Button asChild variant="ghost">
                 <Link href="/login">Se connecter</Link>
               </Button>
-              <Button asChild>
-                <Link href="/register">Commencer gratuitement</Link>
+              <Button asChild variant="outline">
+                <Link href="/register">Créer un compte</Link>
               </Button>
             </>
           )}
@@ -69,10 +69,15 @@ export function SiteHeader({ isAuthenticated }: { isAuthenticated: boolean }) {
             ) : (
               <>
                 <Button asChild size="lg">
-                  <Link href="/register">Commencer gratuitement</Link>
+                  <Link href="/jobs" onClick={() => setOpen(false)}>
+                    Trouver mon alternance <ArrowRight aria-hidden />
+                  </Link>
                 </Button>
                 <Button asChild variant="outline" size="lg">
                   <Link href="/login">Se connecter</Link>
+                </Button>
+                <Button asChild variant="ghost" size="lg">
+                  <Link href="/register">Créer un compte</Link>
                 </Button>
               </>
             )}

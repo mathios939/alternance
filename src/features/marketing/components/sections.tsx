@@ -27,7 +27,7 @@ export function KeyFigures({ stats }: { stats: { jobs: number; companies: number
 }
 
 const STEPS = [
-  { icon: Target, title: "Décris ce que tu cherches", text: "Métier, formation, ville, rythme, mobilité. Moins de 3 minutes, ou importe ton CV pour préremplir." },
+  { icon: Target, title: "Cherche, sans compte", text: "Métier, ville, rayon : les offres s'affichent tout de suite. Trente secondes de plus pour un score personnalisé, toujours sans compte." },
   { icon: Sparkles, title: "Reçois tes opportunités triées", text: "Chaque offre reçoit un score de compatibilité expliqué. Le Radar repère les entreprises qui recrutent sans annonce." },
   { icon: KanbanSquare, title: "Candidate, suis, relance", text: "Un tableau de suivi, des relances programmées, des lettres et messages générés à partir de ton profil." },
 ];
@@ -149,21 +149,31 @@ export function CityLinks() {
   );
 }
 
+const ACCOUNT_PERKS = ["synchroniser tes favoris", "conserver ton profil et plusieurs CV", "suivre tes candidatures et tes relances", "recevoir des alertes utiles", "garder tes conversations avec le Copilote", "retrouver ton historique sur tous tes appareils"];
+
+/** Le compte est un avantage, pas une barrière : tout le cœur du site reste utilisable sans lui. */
 export function FinalCta({ isAuthenticated }: { isAuthenticated: boolean }) {
   return (
     <section className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
       <div className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-primary to-[oklch(0.55_0.2_300)] px-6 py-16 text-center text-primary-foreground shadow-lg sm:px-12">
         <div className="pointer-events-none absolute -top-24 -right-24 size-72 rounded-full bg-white/10 blur-3xl" aria-hidden />
-        <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">Ta mission de demain matin est déjà prête.</h2>
-        <p className="mx-auto mt-3 max-w-xl text-primary-foreground/85">Crée ton profil en 3 minutes. Demain, tu ouvres une seule page et tu sais exactement quoi faire.</p>
+        <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">{isAuthenticated ? "Ta mission de demain matin est déjà prête." : "Crée un compte gratuitement pour retrouver tes candidatures sur tous tes appareils."}</h2>
+        <p className="mx-auto mt-3 max-w-xl text-primary-foreground/85">{isAuthenticated ? "Demain, tu ouvres une seule page et tu sais exactement quoi faire." : "La recherche, les offres, les entreprises et le Radar restent libres. Le compte sert à :"}</p>
+        {!isAuthenticated ? (
+          <ul className="mx-auto mt-5 flex max-w-3xl flex-wrap justify-center gap-2 text-sm">
+            {ACCOUNT_PERKS.map((perk) => (
+              <li key={perk} className="rounded-full border border-white/25 bg-white/10 px-3 py-1">{perk}</li>
+            ))}
+          </ul>
+        ) : null}
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button asChild size="xl" variant="secondary" className="bg-white text-primary hover:bg-white/90">
             <Link href={isAuthenticated ? "/dashboard" : "/register"}>
-              {isAuthenticated ? "Ouvrir mon tableau de bord" : "Commencer gratuitement"} <ArrowRight aria-hidden />
+              {isAuthenticated ? "Ouvrir mon tableau de bord" : "Créer un compte gratuitement"} <ArrowRight aria-hidden />
             </Link>
           </Button>
           <Button asChild size="xl" variant="ghost" className="text-primary-foreground hover:bg-white/10 hover:text-primary-foreground">
-            <Link href="/jobs">Voir les offres sans compte</Link>
+            <Link href="/jobs">{isAuthenticated ? "Voir les offres" : "Continuer sans compte"}</Link>
           </Button>
         </div>
       </div>

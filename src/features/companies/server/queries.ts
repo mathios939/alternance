@@ -209,7 +209,7 @@ export async function getSimilarCompanies(company: { id: string; sector: string;
  * Radar : entreprises pertinentes pour le candidat, avec ou sans offre active.
  * Classement par OpportunityScore (estimation).
  */
-export async function getRadar(ctx: { userId: string; candidate: CandidateForMatching }, options?: { limit?: number; radiusKm?: number; onlyWithoutJobs?: boolean; sectors?: string[]; sizes?: CompanySize[] }) {
+export async function getRadar(ctx: { userId?: string; candidate: CandidateForMatching }, options?: { limit?: number; radiusKm?: number; onlyWithoutJobs?: boolean; sectors?: string[]; sizes?: CompanySize[] }) {
   const c = ctx.candidate;
   const radius = options?.radiusKm ?? c.maxRadiusKm;
   const where: Prisma.CompanyWhereInput = visibleCompaniesWhere();
@@ -249,6 +249,15 @@ export async function getRadar(ctx: { userId: string; candidate: CandidateForMat
   const total = scored.length;
   const items = scored.slice(0, options?.limit ?? 50).map((s) => ({ ...toCompanyCard(s.company, ctx, enrichment, { opportunity: s.opportunity, distanceKm: s.opportunity.distanceKm }), nearestCity: s.nearestCity }));
   return { items, total, radius };
+}
+
+/** Cartes d'entreprises par identifiants (favoris locaux, comparaisons), dans l'ordre demandé. */
+export async function getCompaniesByIds(ids: string[], ctx: Ctx): Promise<CompanyCardData[]> {
+  if (ids.length === 0) return [];
+  const companies = await prisma.company.findMany({ where: { id: { in: ids }, ...visibleCompaniesWhere() }, include: companyCardInclude });
+  const enrichment = await loadEnrichment(ctx.userId, ids);
+  const byId = new Map(companies.map((c) => [c.id, c]));
+  return ids.map((id) => byId.get(id)).filter((c): c is CompanyWithCounts => Boolean(c)).map((c) => toCompanyCard(c, ctx, enrichment));
 }
 
 export const getFeaturedCompanies = cache(async (limit = 6): Promise<CompanyCardData[]> => {
