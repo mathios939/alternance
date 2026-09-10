@@ -492,6 +492,8 @@ export type NationalSyncOptions = {
   now?: () => Date;
   onTerritory?: (result: TerritorySyncResult) => void;
   onChunk?: TerritorySyncOptions["onChunk"];
+  /** Appelé avant chaque territoire : permet d'intercaler un passage « nouveautés » pendant un long rattrapage. */
+  beforeTerritory?: () => Promise<void>;
 };
 
 export type NationalSyncReport = {
@@ -545,6 +547,7 @@ export async function runNationalSync(options: NationalSyncOptions): Promise<Nat
       break;
     }
     if (options.maxTerritories !== undefined && report.synced >= options.maxTerritories) break;
+    if (options.beforeTerritory) await options.beforeTerritory();
     const result = await syncTerritory({
       provider: options.provider,
       territory,

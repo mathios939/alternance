@@ -131,6 +131,7 @@ Toutes documentées dans [`.env.example`](.env.example). L'application fonctionn
 | `AI_PROVIDER` (`anthropic` \| `openai` \| `mock`), `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `AI_EFFORT`, `OPENAI_*` | non | copilote et génération |
 | `NEXT_PUBLIC_MAP_STYLE_URL`, `TRAVEL_TIME_PROVIDER`, `OSRM_BASE_URL` | non | carte et trajets |
 | `FRANCE_TRAVAIL_CLIENT_ID/SECRET` | non | agrégation France Travail |
+| `LA_BONNE_ALTERNANCE_API_KEY`, `LA_BONNE_ALTERNANCE_KEY_TYPE` | non | deuxième source La bonne alternance (clé de production requise pour ingérer) |
 | `ADMIN_EMAILS` | non | emails promus ADMIN à l'inscription |
 | `NEXT_PUBLIC_DEMO_MODE` | non | badges et mentions « démo » |
 
@@ -238,6 +239,7 @@ Détail complet dans [`docs/PROVIDERS.md`](docs/PROVIDERS.md). Règle commune : 
 | Domaine | Intégration | Clé | Test |
 |---|---|---|---|
 | Offres | France Travail « Offres d'emploi v2 » (`FranceTravailProvider`) | `FRANCE_TRAVAIL_CLIENT_ID` / `_SECRET` | `npm run test:france-travail` |
+| Offres | La bonne alternance — API Alternance du Ministère du Travail, licence Etalab-2.0 (`LaBonneAlternanceProvider` ; relais France Travail ignorés) | `LA_BONNE_ALTERNANCE_API_KEY` + `LA_BONNE_ALTERNANCE_KEY_TYPE=production` | `npm run test:lba` |
 | Offres | Flux carrières fournis (JSON Feed / RSS) | `CAREER_FEEDS_JSON` | — |
 | Entreprises | API Recherche d'entreprises (SIRENE, open data) | aucune | `npm run test:companies` |
 | Contacts | Bloc « contact » des offres officielles uniquement | — | couvert par l'intégration |

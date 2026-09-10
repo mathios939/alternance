@@ -52,6 +52,10 @@ export type RunIngestionOptions = {
 
 const DEDUPE_WINDOW_DAYS = 120;
 const LOOKUP_CHUNK = 500;
+const INGEST_CONCURRENCY = (() => {
+  const n = Number(process.env["INGEST_CONCURRENCY"]);
+  return Number.isFinite(n) && n > 0 ? Math.min(8, Math.floor(n)) : 4;
+})();
 
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 1296)
@@ -441,17 +445,35 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
       loadExistingEntries(source.id, jobs),
     ]);
     const skillIdBySlug = new Map(skillRows.map((s) => [s.slug, s.id]));
-    const companyCache = new Map<string, CompanyMatch>();
+    // Entreprises : une promesse par (nom normalisé, département) — deux offres du même employeur
+    // traitées en parallèle ne créent jamais deux fiches.
+    const companyCache = new Map<string, Promise<CompanyMatch>>();
+    const resolveCompany = (job: NormalizedJob, ts: Date): Promise<CompanyMatch> => {
+      const key = `${job.companyNameNormalized}|${job.department ?? ""}`;
+      let pending = companyCache.get(key);
+      if (!pending) {
+        pending = findOrCreateCompanyForJob(job, {
+          sourceKey: provider.key,
+          sourceLabel: provider.name,
+          now: ts,
+        }).then((company) => {
+          if (company.created) companiesCreated++;
+          return { ...company, created: false };
+        });
+        companyCache.set(key, pending);
+      }
+      return pending;
+    };
     const unchanged: ExistingEntry[] = [];
 
-    for (const raw of jobs) {
+    const processOne = async (raw: RawJob): Promise<void> => {
       try {
         // VALIDATION
         const validation = validateRawJob(raw, { now: now() });
         if (!validation.ok) {
           report.rejected++;
           rejectedBy[validation.code] = (rejectedBy[validation.code] ?? 0) + 1;
-          continue;
+          return;
         }
         // NORMALIZATION
         const job = normalizeJob(raw, { key: provider.key, type: provider.type, isDemo: false });
@@ -476,7 +498,7 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
             ]);
           }
           report.updated++;
-          continue;
+          return;
         }
 
         // DEDUPLICATION 2 : même offre venue d'une autre source → rattachement à l'offre canonique.
@@ -504,21 +526,11 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
           });
           await refreshCanonicalApplication(match.match.id);
           report.duplicates++;
-          continue;
+          return;
         }
 
         // ENRICHMENT : entreprise (mémorisée pendant l'exécution), compétences, qualité, contact publié
-        const companyKey = `${job.companyNameNormalized}|${job.department ?? ""}`;
-        let company = companyCache.get(companyKey);
-        if (!company) {
-          company = await findOrCreateCompanyForJob(job, {
-            sourceKey: provider.key,
-            sourceLabel: provider.name,
-            now: ts,
-          });
-          companyCache.set(companyKey, { ...company, created: false });
-          if (company.created) companiesCreated++;
-        }
+        const company = await resolveCompany(job, ts);
         const skillIds = job.skillSlugs
           .map((slug) => skillIdBySlug.get(slug))
           .filter((id): id is string => Boolean(id));
@@ -571,7 +583,19 @@ export async function runIngestion(options: RunIngestionOptions): Promise<Ingest
           externalId: raw.externalId,
         });
       }
-    }
+    };
+
+    // Les offres d'un lot sont traitées par petits groupes parallèles : le temps est dominé par la
+    // latence base de données, pas par le calcul (INGEST_CONCURRENCY, 4 par défaut, 8 max).
+    let cursor = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(INGEST_CONCURRENCY, Math.max(1, jobs.length)) }, async () => {
+        while (cursor < jobs.length) {
+          const raw = jobs[cursor++]!;
+          await processOne(raw);
+        }
+      }),
+    );
 
     if (unchanged.length) await touchUnchanged(unchanged, now());
 

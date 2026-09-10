@@ -102,8 +102,13 @@ export async function GET() {
     database = "unhealthy";
   }
 
-  const franceTravail = getJobSourceProviders(env).find((p) => p.key === "france-travail");
+  const providers = getJobSourceProviders(env);
+  const franceTravail = providers.find((p) => p.key === "france-travail");
   const franceTravailStatus = franceTravail ? await franceTravail.status() : { configured: false };
+  const laBonneAlternance = providers.find((p) => p.key === "la-bonne-alternance");
+  const laBonneAlternanceStatus = laBonneAlternance
+    ? await laBonneAlternance.status()
+    : { configured: false };
   const companyProvider =
     (env["COMPANY_DATA_PROVIDER"] ?? "recherche-entreprises") !== "none"
       ? getCompanyDataProvider()
@@ -121,6 +126,7 @@ export async function GET() {
     demoMode: isDemoModeEnabled(env),
     services: {
       franceTravail: franceTravailStatus.configured ? "configured" : "not_configured",
+      laBonneAlternance: laBonneAlternanceStatus.configured ? "configured" : "not_configured",
       companyData: companyProvider ? "available" : "not_configured",
       ai: aiConfigured ? "configured" : aiProvider === "mock" ? "mock" : "not_configured",
       travelTime: osrmConfigured ? "configured" : "not_configured",

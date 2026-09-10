@@ -108,6 +108,75 @@ jobs:
           echo "France Travail : $STATUS"
           case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
 
+  la-bonne-alternance-validation:
+    name: La bonne alternance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      status: ${{ steps.report.outputs.status }}
+      latency_ms: ${{ steps.report.outputs.latency_ms }}
+      count: ${{ steps.report.outputs.count }}
+      provider: ${{ steps.report.outputs.provider }}
+      tested_at: ${{ steps.report.outputs.tested_at }}
+      message: ${{ steps.report.outputs.message }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la présence de la clé (valeur jamais affichée)
+        id: check
+        env:
+          LBA_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+        run: |
+          if [ -z "$LBA_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED — SECRET NOT CONFIGURED (LA_BONNE_ALTERNANCE_API_KEY)"
+            echo "::warning title=La bonne alternance::SKIPPED — SECRET NOT CONFIGURED"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Clé présente."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Test externe La bonne alternance (recherche ville + département, export complet)
+        if: steps.check.outputs.configured == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          LA_BONNE_ALTERNANCE_API_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+          LA_BONNE_ALTERNANCE_KEY_TYPE: ${{ vars.LA_BONNE_ALTERNANCE_KEY_TYPE }}
+          FT_CITY: ${{ inputs.france_travail_city }}
+        run: npm run test:lba -- --city "$FT_CITY" --radius 30 --department 44 --export
+
+      - name: Rapport
+        id: report
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.check.outputs.configured }}
+        run: |
+          if [ "$CONFIGURED" = "true" ]; then
+            npx tsx tests/external/report.ts la-bonne-alternance
+          else
+            printf 'status=NOT_CONFIGURED\nlatency_ms=\ncount=\nprovider=la-bonne-alternance\ntested_at=%s\nmessage=SKIPPED — SECRET NOT CONFIGURED\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+            printf '### La bonne alternance — ⚪ NOT CONFIGURED\n\nSKIPPED — SECRET NOT CONFIGURED : ajoute `LA_BONNE_ALTERNANCE_API_KEY` (clé gratuite sur https://api.apprentissage.beta.gouv.fr/compte/profil) et la variable `LA_BONNE_ALTERNANCE_KEY_TYPE` (`production` une fois la clé de production obtenue auprès de support_api@apprentissage.beta.gouv.fr).\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Statut du job
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "La bonne alternance : $STATUS"
+          case "$STATUS" in SUCCESS|NOT_CONFIGURED) exit 0 ;; *) exit 1 ;; esac
+
   company-api-validation:
     name: API Recherche d'entreprises
     runs-on: ubuntu-latest
@@ -289,7 +358,7 @@ jobs:
   summary:
     name: Résumé External Validation
     runs-on: ubuntu-latest
-    needs: [france-travail-validation, company-api-validation, osrm-validation, ai-provider-validation]
+    needs: [france-travail-validation, la-bonne-alternance-validation, company-api-validation, osrm-validation, ai-provider-validation]
     if: always()
     steps:
       - name: Écrire le résumé
@@ -298,6 +367,11 @@ jobs:
           FT_LAT: ${{ needs.france-travail-validation.outputs.latency_ms }}
           FT_COUNT: ${{ needs.france-travail-validation.outputs.count }}
           FT_MSG: ${{ needs.france-travail-validation.outputs.message }}
+          LBA_STATUS: ${{ needs.la-bonne-alternance-validation.outputs.status }}
+          LBA_LAT: ${{ needs.la-bonne-alternance-validation.outputs.latency_ms }}
+          LBA_COUNT: ${{ needs.la-bonne-alternance-validation.outputs.count }}
+          LBA_MSG: ${{ needs.la-bonne-alternance-validation.outputs.message }}
+          LBA_DATE: ${{ needs.la-bonne-alternance-validation.outputs.tested_at }}
           CO_STATUS: ${{ needs.company-api-validation.outputs.status }}
           CO_LAT: ${{ needs.company-api-validation.outputs.latency_ms }}
           CO_COUNT: ${{ needs.company-api-validation.outputs.count }}
@@ -335,11 +409,13 @@ jobs:
             echo "| Service | Statut réel | Latence | Résultats | Fournisseur | Date du test |"
             echo "|---|---|---|---|---|---|"
             echo "| France Travail | $(label "$FT_STATUS") | ${FT_LAT:-—} ms | ${FT_COUNT:-—} offres | france-travail | ${FT_DATE:-—} |"
+            echo "| La bonne alternance | $(label "$LBA_STATUS") | ${LBA_LAT:-—} ms | ${LBA_COUNT:-—} offres | la-bonne-alternance | ${LBA_DATE:-—} |"
             echo "| Recherche entreprises | $(label "$CO_STATUS") | ${CO_LAT:-—} ms | ${CO_COUNT:-—} fiches | recherche-entreprises | ${CO_DATE:-—} |"
             echo "| IA | $(label "$AI_STATUS") | ${AI_LAT:-—} ms | — | ${AI_PROVIDER:-—} ${AI_MODEL:+(}${AI_MODEL}${AI_MODEL:+)} | ${AI_DATE:-—} |"
             echo "| OSRM | $(label "$OS_STATUS") | ${OS_LAT:-—} ms | — | osrm | ${OS_DATE:-—} |"
             echo ""
             [ -n "$FT_MSG" ] && echo "- France Travail : ${FT_MSG}"
+            [ -n "$LBA_MSG" ] && echo "- La bonne alternance : ${LBA_MSG}"
             [ -n "$CO_MSG" ] && echo "- Recherche entreprises : ${CO_MSG}"
             [ -n "$AI_MSG" ] && echo "- IA : ${AI_MSG}"
             [ -n "$OS_MSG" ] && echo "- OSRM : ${OS_MSG}"
@@ -354,6 +430,11 @@ jobs:
           FT_COUNT: ${{ needs.france-travail-validation.outputs.count }}
           FT_DATE: ${{ needs.france-travail-validation.outputs.tested_at }}
           FT_MSG: ${{ needs.france-travail-validation.outputs.message }}
+          LBA_STATUS: ${{ needs.la-bonne-alternance-validation.outputs.status }}
+          LBA_LAT: ${{ needs.la-bonne-alternance-validation.outputs.latency_ms }}
+          LBA_COUNT: ${{ needs.la-bonne-alternance-validation.outputs.count }}
+          LBA_DATE: ${{ needs.la-bonne-alternance-validation.outputs.tested_at }}
+          LBA_MSG: ${{ needs.la-bonne-alternance-validation.outputs.message }}
           CO_STATUS: ${{ needs.company-api-validation.outputs.status }}
           CO_LAT: ${{ needs.company-api-validation.outputs.latency_ms }}
           CO_COUNT: ${{ needs.company-api-validation.outputs.count }}
@@ -381,6 +462,7 @@ jobs:
               branch: e.GITHUB_REF_NAME,
               commit: e.GITHUB_SHA,
               franceTravail: svc(e.FT_STATUS, e.FT_LAT, e.FT_COUNT, e.FT_DATE, e.FT_MSG, { provider: "france-travail" }),
+              laBonneAlternance: svc(e.LBA_STATUS, e.LBA_LAT, e.LBA_COUNT, e.LBA_DATE, e.LBA_MSG, { provider: "la-bonne-alternance" }),
               companyApi: svc(e.CO_STATUS, e.CO_LAT, e.CO_COUNT, e.CO_DATE, e.CO_MSG, { provider: "recherche-entreprises" }),
               aiProvider: svc(e.AI_STATUS, e.AI_LAT, null, e.AI_DATE, e.AI_MSG, { provider: e.AI_PROVIDER || null, model: e.AI_MODEL || null }),
               osrm: svc(e.OS_STATUS, e.OS_LAT, null, e.OS_DATE, e.OS_MSG, { provider: "osrm" }),

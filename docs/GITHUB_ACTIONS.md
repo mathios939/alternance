@@ -1,6 +1,6 @@
 # Validation externe avec GitHub Actions
 
-Cet environnement de développement n'a pas d'accès Internet : les intégrations réelles (France Travail, API Recherche d'entreprises, OSRM, fournisseur IA) se valident **depuis GitHub Actions** ou **depuis une machine locale avec réseau**. Les deux chemins exécutent exactement les mêmes scripts (`tests/external/*.ts`).
+Cet environnement de développement n'a pas d'accès Internet : les intégrations réelles (France Travail, La bonne alternance, API Recherche d'entreprises, OSRM, fournisseur IA) se valident **depuis GitHub Actions** ou **depuis une machine locale avec réseau**. Les deux chemins exécutent exactement les mêmes scripts (`tests/external/*.ts`).
 
 Statut du projet tant que ces workflows n'ont pas été exécutés avec succès : **INTEGRATION_TESTED** (serveurs simulés, base locale). Une exécution réussie fait passer chaque service à **EXTERNAL_VERIFIED**.
 
@@ -14,6 +14,7 @@ Dans le dépôt GitHub : **Settings → Secrets and variables → Actions**.
 |---|---|---|
 | `FRANCE_TRAVAIL_CLIENT_ID` | France Travail, smoke test | <https://francetravail.io> : compte, application, abonnement à l'API « Offres d'emploi v2 » |
 | `FRANCE_TRAVAIL_CLIENT_SECRET` | France Travail, smoke test | même écran (clé secrète de l'application) |
+| `LA_BONNE_ALTERNANCE_API_KEY` | La bonne alternance (deuxième source) | <https://api.apprentissage.beta.gouv.fr/compte/profil> : compte, clé d'API gratuite (licence Etalab-2.0, CGU <https://api.apprentissage.beta.gouv.fr/cgu>) ; clé de type **production** à demander à <support_api@apprentissage.beta.gouv.fr> (une clé sandbox renvoie des données de test) |
 | `ANTHROPIC_API_KEY` | Fournisseur IA (si `AI_PROVIDER=anthropic`) | <https://console.anthropic.com> |
 | `OPENAI_API_KEY` | Fournisseur IA (si `AI_PROVIDER=openai`) | console du fournisseur compatible OpenAI |
 | `OSRM_BASE_URL` | OSRM (uniquement si l'URL de votre instance est confidentielle ; sinon utilisez une variable) | votre instance OSRM |
@@ -27,6 +28,7 @@ Dans le dépôt GitHub : **Settings → Secrets and variables → Actions**.
 | `OPENAI_MODEL` / `OPENAI_BASE_URL` | Modèle et endpoint compatible OpenAI (optionnels) | `gpt-4.1` |
 | `OSRM_BASE_URL` | Instance OSRM à tester (sans slash final) | `https://osrm.exemple.fr` |
 | `COMPANY_DATA_PROVIDER` | Laisser vide ; `none` désactive le test entreprises | — |
+| `LA_BONNE_ALTERNANCE_KEY_TYPE` | Type de la clé La bonne alternance : `production` (offres réelles, ingestion active) ou `sandbox` (données de test, ingestion refusée) | `production` |
 
 Aucune de ces valeurs ne doit apparaître dans Git, le README, `.env.example`, les logs ni les captures. Les workflows n'affichent que la **présence** d'un secret, jamais sa valeur ; GitHub masque de toute façon les secrets dans les logs.
 
@@ -36,7 +38,7 @@ Chemin : **onglet Actions du dépôt → workflow dans la colonne de gauche → 
 
 ### Ordre recommandé
 
-1. **External validation** (`.github/workflows/external-validation.yml`). Quatre jobs indépendants : `france-travail-validation`, `company-api-validation`, `osrm-validation`, `ai-provider-validation`, puis un job `summary` qui écrit le tableau « Service / Statut réel » dans le résumé du run (✅ SUCCESS, ⚪ NOT CONFIGURED, ❌ AUTH ERROR, ❌ NETWORK ERROR, ❌ INVALID RESPONSE, ⚠️ RATE LIMITED, latence, nombre de résultats, fournisseur, date).
+1. **External validation** (`.github/workflows/external-validation.yml`). Cinq jobs indépendants : `france-travail-validation`, `la-bonne-alternance-validation` (recherche ville + département, export complet), `company-api-validation`, `osrm-validation`, `ai-provider-validation`, puis un job `summary` qui écrit le tableau « Service / Statut réel » dans le résumé du run (✅ SUCCESS, ⚪ NOT CONFIGURED, ❌ AUTH ERROR, ❌ NETWORK ERROR, ❌ INVALID RESPONSE, ⚠️ RATE LIMITED, latence, nombre de résultats, fournisseur, date).
 2. **Real data smoke test** (`.github/workflows/real-data-smoke-test.yml`), seulement une fois France Travail en PASS. Il démarre un PostgreSQL éphémère (conteneur de service), applique les migrations (`prisma migrate deploy`), ingère au plus 50 vraies offres (« développeur », Nantes, 30 km par défaut), rejoue l'ingestion pour prouver le dédoublonnage, calcule le Match Score avec un candidat synthétique et publie le rapport : Fetched, Normalized, Rejected, Inserted, Duplicates, Missing location, Missing application URL, Missing description, Companies matched, Match Score calculated, External URLs valid format, qualité moyenne. La base est détruite avec le runner ; **aucune base de production n'est jamais contactée**.
 
 ### Lecture des résultats

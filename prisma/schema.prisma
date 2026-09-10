@@ -959,11 +959,15 @@ model SyncCheckpoint {
 /// Compteur d'appels sortants par fournisseur et par minute : quota global partagé entre processus
 /// (workers GitHub Actions et fonctions serverless ne dépassent jamais ensemble la limite officielle).
 model ProviderQuota {
-  id       String   @id @default(cuid())
-  provider String
+  id          String   @id @default(cuid())
+  provider    String
   /// Minute UTC tronquée.
-  bucket   DateTime
-  requests Int      @default(0)
+  bucket      DateTime
+  requests    Int      @default(0)
+  /// Réponses 429 reçues dans la minute (observabilité : jamais dépasser le quota officiel).
+  rateLimited Int      @default(0)
+  /// Requêtes terminées en erreur (5xx, réseau, délai) dans la minute.
+  errors      Int      @default(0)
 
   @@unique([provider, bucket])
   @@map("provider_quota")

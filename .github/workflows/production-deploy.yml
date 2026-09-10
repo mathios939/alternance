@@ -101,6 +101,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
           FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          LA_BONNE_ALTERNANCE_API_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+          LA_BONNE_ALTERNANCE_KEY_TYPE: ${{ vars.LA_BONNE_ALTERNANCE_KEY_TYPE }}
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
         run: |
           set -e
@@ -128,6 +130,10 @@ jobs:
           if [ -n "$FRANCE_TRAVAIL_CLIENT_ID" ] && [ -n "$FRANCE_TRAVAIL_CLIENT_SECRET" ]; then
             upsert FRANCE_TRAVAIL_CLIENT_ID "$FRANCE_TRAVAIL_CLIENT_ID"
             upsert FRANCE_TRAVAIL_CLIENT_SECRET "$FRANCE_TRAVAIL_CLIENT_SECRET"
+          fi
+          if [ -n "$LA_BONNE_ALTERNANCE_API_KEY" ]; then
+            upsert LA_BONNE_ALTERNANCE_API_KEY "$LA_BONNE_ALTERNANCE_API_KEY"
+            upsert LA_BONNE_ALTERNANCE_KEY_TYPE "${LA_BONNE_ALTERNANCE_KEY_TYPE:-sandbox}"
           fi
           if [ -n "$ADMIN_EMAILS" ]; then upsert ADMIN_EMAILS "$ADMIN_EMAILS"; fi
 

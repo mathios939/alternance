@@ -277,6 +277,12 @@ export class FranceTravailClient {
         if (
           error instanceof FranceTravailApiError &&
           (error.code === "TIMEOUT" || error.code === "NETWORK") &&
+          attempt >= this.cfg.maxRetries
+        )
+          this.quota?.reportFailure();
+        if (
+          error instanceof FranceTravailApiError &&
+          (error.code === "TIMEOUT" || error.code === "NETWORK") &&
           attempt < this.cfg.maxRetries
         ) {
           const wait = 500 * 2 ** attempt;
@@ -319,6 +325,7 @@ export class FranceTravailClient {
         await this.sleep(pauseMs);
         return this.request<T>(path, params, attempt + 1, refreshed, priority);
       }
+      this.quota?.reportFailure();
       throw new FranceTravailApiError(
         "Limite de débit France Travail dépassée (429) après plusieurs tentatives",
         "RATE_LIMITED",

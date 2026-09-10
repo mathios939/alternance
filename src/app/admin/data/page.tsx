@@ -158,6 +158,120 @@ export default async function AdminDataPage() {
             Dernière erreur : {coverage.territories.lastError}
           </p>
         ) : null}
+        <div className="border-t px-4 py-3">
+          <h4 className="text-muted-foreground mb-2 text-xs font-semibold uppercase">
+            Suivi du rattrapage national
+          </h4>
+          <dl className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 xl:grid-cols-3">
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Départements terminés</dt>
+              <dd className="tabular-nums">
+                {coverage.tracking.done} / {coverage.territories.total}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">En cours</dt>
+              <dd className="text-right">{coverage.tracking.inProgress.join(", ") || "aucun"}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">En erreur</dt>
+              <dd className="tabular-nums">{coverage.tracking.errors.length}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Dernier checkpoint</dt>
+              <dd className="text-right">
+                {coverage.tracking.lastCheckpoint
+                  ? `${coverage.tracking.lastCheckpoint.territory} · ${coverage.tracking.lastCheckpoint.window} · ${coverage.tracking.lastCheckpoint.status} · ${formatRelative(new Date(coverage.tracking.lastCheckpoint.at))}`
+                  : "aucun"}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Durée moyenne par département</dt>
+              <dd className="tabular-nums">
+                {coverage.tracking.averageDurationMs !== null
+                  ? `${Math.round(coverage.tracking.averageDurationMs / 1000)} s`
+                  : "—"}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">API 24 h</dt>
+              <dd className="text-right tabular-nums">
+                {coverage.tracking.quota24h.requests} req · pic{" "}
+                {coverage.tracking.quota24h.peakPerMinute}/min · 429 :{" "}
+                {coverage.tracking.quota24h.rateLimited} · erreurs :{" "}
+                {coverage.tracking.quota24h.errors}
+              </dd>
+            </div>
+          </dl>
+          {coverage.tracking.errors.length > 0 ? (
+            <ul className="text-destructive mt-2 space-y-0.5 text-xs">
+              {coverage.tracking.errors.slice(0, 10).map((e) => (
+                <li key={`${e.territory}-${e.window}`}>
+                  {e.territory} ({e.window}) · {formatRelative(new Date(e.at))} :{" "}
+                  {e.error ?? "erreur inconnue"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <details className="mt-2">
+            <summary className="text-muted-foreground cursor-pointer text-xs">
+              Détail par département ({coverage.tracking.territories.length})
+            </summary>
+            <div className="mt-2 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Département</TableHead>
+                    <TableHead className="text-xs">Région</TableHead>
+                    <TableHead className="text-xs">Statut</TableHead>
+                    <TableHead className="text-xs">Fenêtre</TableHead>
+                    <TableHead className="text-xs">Dernier succès</TableHead>
+                    <TableHead className="text-right text-xs">Durée</TableHead>
+                    <TableHead className="text-right text-xs">Créées / vues</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {coverage.tracking.territories.map((t) => (
+                    <TableRow key={t.code}>
+                      <TableCell className="text-xs">
+                        {t.code} · {t.name}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{t.region}</TableCell>
+                      <TableCell className="text-xs">
+                        <span
+                          className={
+                            t.status === "ERROR"
+                              ? "text-destructive"
+                              : t.status === "DONE"
+                                ? "text-success"
+                                : ""
+                          }
+                        >
+                          {t.status}
+                        </span>
+                        {t.error ? (
+                          <span className="text-destructive block max-w-[16rem] truncate">
+                            {t.error}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-xs">{t.window ?? "—"}</TableCell>
+                      <TableCell className="text-xs">
+                        {t.lastSuccessAt ? formatRelative(new Date(t.lastSuccessAt)) : "jamais"}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {t.durationMs !== null ? `${Math.round(t.durationMs / 1000)} s` : "—"}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {t.created} / {t.fetched}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </details>
+        </div>
         <div className="grid gap-0 border-t md:grid-cols-2">
           <div>
             <h4 className="text-muted-foreground px-4 py-2 text-xs font-semibold uppercase">

@@ -11,6 +11,7 @@ import type { ExternalResult } from "./lib/harness";
 
 const SUITES: Array<[label: string, script: string, slug: string]> = [
   ["France Travail", "tests/external/france-travail.ts", "france-travail"],
+  ["La bonne alternance", "tests/external/la-bonne-alternance.ts", "la-bonne-alternance"],
   ["API Recherche d'entreprises", "tests/external/companies.ts", "companies"],
   ["OSRM", "tests/external/osrm.ts", "osrm"],
   ["Fournisseur IA", "tests/external/ai-provider.ts", "ai-provider"],
@@ -22,11 +23,24 @@ let missing = false;
 const rows: string[] = [];
 for (const [label, script, slug] of SUITES) {
   heading(`▶ ${label}`);
-  const result = spawnSync(process.execPath, [require.resolve("tsx/cli"), script], { stdio: "inherit", env: process.env });
+  const result = spawnSync(process.execPath, [require.resolve("tsx/cli"), script], {
+    stdio: "inherit",
+    env: process.env,
+  });
   const file = join(dir, `${slug}.json`);
-  const parsed = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as ExternalResult) : null;
-  const status = parsed?.status ?? (result.status === EXIT.NOT_CONFIGURED ? "NOT_CONFIGURED" : result.status === EXIT.OK ? "SUCCESS" : "FAILED");
-  rows.push(`${label.padEnd(28)} ${status}${parsed?.details["latencyMs"] !== undefined ? ` · ${parsed.details["latencyMs"]} ms` : ""}${parsed?.details["count"] !== undefined ? ` · ${parsed.details["count"]} résultat(s)` : ""}`);
+  const parsed = existsSync(file)
+    ? (JSON.parse(readFileSync(file, "utf8")) as ExternalResult)
+    : null;
+  const status =
+    parsed?.status ??
+    (result.status === EXIT.NOT_CONFIGURED
+      ? "NOT_CONFIGURED"
+      : result.status === EXIT.OK
+        ? "SUCCESS"
+        : "FAILED");
+  rows.push(
+    `${label.padEnd(28)} ${status}${parsed?.details["latencyMs"] !== undefined ? ` · ${parsed.details["latencyMs"]} ms` : ""}${parsed?.details["count"] !== undefined ? ` · ${parsed.details["count"]} résultat(s)` : ""}`,
+  );
   if (status === "SUCCESS") ok(`${label} : SUCCESS`);
   else if (status === "NOT_CONFIGURED") {
     warn(`${label} : SKIPPED — SECRET NOT CONFIGURED`);

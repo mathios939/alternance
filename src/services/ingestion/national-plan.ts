@@ -10,7 +10,7 @@ import {
  * PLANIFICATION DE LA SYNCHRONISATION NATIONALE (module pur, sans base) :
  * ordre des territoires, fenêtres, découpe des morceaux tronqués.
  */
-export const SYNC_WINDOWS = { "1d": 1, "3d": 3, "7d": 7, "31d": 31 } as const;
+export const SYNC_WINDOWS = { "1d": 1, "3d": 3, "7d": 7, "31d": 31, "90d": 90, "120d": 120 } as const;
 export type SyncWindow = keyof typeof SYNC_WINDOWS;
 export const SYNC_WINDOW_KEYS = Object.keys(SYNC_WINDOWS) as SyncWindow[];
 

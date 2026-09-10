@@ -18,10 +18,10 @@ on:
         default: ""
         required: false
       window:
-        description: "Fenêtre de publication"
+        description: "Fenêtre de publication (date de création côté source)"
         type: choice
-        options: [31d, 7d, 3d, 1d]
-        default: 31d
+        options: [90d, 120d, 31d, 7d, 3d, 1d]
+        default: 90d
       max_minutes:
         description: "Budget de temps (minutes, ≤ 330)"
         default: "330"
@@ -30,6 +30,15 @@ on:
         description: "Resynchroniser même les territoires à jour (< 20 h)"
         type: boolean
         default: false
+      interleave_recent_minutes:
+        description: "Intercaler un passage « nouveautés France entière » toutes les N minutes (0 = jamais)"
+        default: "45"
+        required: false
+      source:
+        description: "Source à rattraper"
+        type: choice
+        options: [france-travail, la-bonne-alternance]
+        default: france-travail
 
 concurrency:
   group: production-sync
@@ -98,15 +107,19 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
           FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+          LA_BONNE_ALTERNANCE_API_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+          LA_BONNE_ALTERNANCE_KEY_TYPE: ${{ vars.LA_BONNE_ALTERNANCE_KEY_TYPE }}
           SCOPE: ${{ inputs.scope }}
           DEPTS: ${{ inputs.departments }}
           WINDOW: ${{ inputs.window }}
           MAX_MINUTES: ${{ inputs.max_minutes }}
           FORCE: ${{ inputs.force }}
+          INTERLEAVE: ${{ inputs.interleave_recent_minutes }}
+          SOURCE: ${{ inputs.source || 'france-travail' }}
         run: |
-          printf '## Production backfill (%s)\n\nPérimètre : `%s` · fenêtre `%s` · budget %s min\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DEPTS:-$SCOPE}" "$WINDOW" "$MAX_MINUTES" >> "$GITHUB_STEP_SUMMARY"
+          printf '## Production backfill (%s)\n\nSource : `%s` · périmètre : `%s` · fenêtre `%s` · budget %s min\n\n```\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SOURCE" "${DEPTS:-$SCOPE}" "$WINDOW" "$MAX_MINUTES" >> "$GITHUB_STEP_SUMMARY"
           MAX=$(( MAX_MINUTES > 330 ? 330 : MAX_MINUTES ))
-          args=(--window "$WINDOW" --max-minutes "$MAX" --trigger backfill)
+          args=(--source "$SOURCE" --window "$WINDOW" --max-minutes "$MAX" --trigger backfill --interleave-recent-minutes "${INTERLEAVE:-45}")
           if [ -n "$DEPTS" ]; then args+=(--departments "$DEPTS"); else args+=(--scope "$SCOPE"); fi
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
           npm run jobs:sync:national -- "${args[@]}" | tee backfill.log
@@ -120,4 +133,6 @@ jobs:
         run: |
           printf '\n### Couverture réelle\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
           npm run db:coverage | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '```\n\n### Contrôle qualité\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:quality | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"

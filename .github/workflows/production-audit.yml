@@ -20,6 +20,8 @@ jobs:
       S_CRON_SECRET: ${{ secrets.CRON_SECRET }}
       S_FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
       S_FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+      S_LA_BONNE_ALTERNANCE_API_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+      V_LA_BONNE_ALTERNANCE_KEY_TYPE: ${{ vars.LA_BONNE_ALTERNANCE_KEY_TYPE }}
       S_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       S_VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       S_VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -42,6 +44,8 @@ jobs:
             echo "| CRON_SECRET | secret | $(present "$S_CRON_SECRET") |"
             echo "| FRANCE_TRAVAIL_CLIENT_ID | secret | $(present "$S_FRANCE_TRAVAIL_CLIENT_ID") |"
             echo "| FRANCE_TRAVAIL_CLIENT_SECRET | secret | $(present "$S_FRANCE_TRAVAIL_CLIENT_SECRET") |"
+            echo "| LA_BONNE_ALTERNANCE_API_KEY | secret (deuxième source, optionnel) | $(present "$S_LA_BONNE_ALTERNANCE_API_KEY") |"
+            echo "| LA_BONNE_ALTERNANCE_KEY_TYPE | variable (production / sandbox) | ${V_LA_BONNE_ALTERNANCE_KEY_TYPE:-ABSENT} |"
             echo "| VERCEL_TOKEN | secret | $(present "$S_VERCEL_TOKEN") |"
             echo "| VERCEL_ORG_ID | secret ou variable | $(present "$S_VERCEL_ORG_ID$V_VERCEL_ORG_ID") |"
             echo "| VERCEL_PROJECT_ID | secret ou variable | $(present "$S_VERCEL_PROJECT_ID$V_VERCEL_PROJECT_ID") |"
@@ -52,6 +56,7 @@ jobs:
           echo "AUDIT_BETTER_AUTH_SECRET=$(present "$S_BETTER_AUTH_SECRET")"
           echo "AUDIT_CRON_SECRET=$(present "$S_CRON_SECRET")"
           echo "AUDIT_FRANCE_TRAVAIL=$(present "$S_FRANCE_TRAVAIL_CLIENT_ID$S_FRANCE_TRAVAIL_CLIENT_SECRET")"
+          echo "AUDIT_LA_BONNE_ALTERNANCE=$(present "$S_LA_BONNE_ALTERNANCE_API_KEY") (type : ${V_LA_BONNE_ALTERNANCE_KEY_TYPE:-ABSENT})"
           echo "AUDIT_VERCEL_TOKEN=$(present "$S_VERCEL_TOKEN")"
           echo "AUDIT_VERCEL_ORG_ID=$(present "$S_VERCEL_ORG_ID$V_VERCEL_ORG_ID")"
           echo "AUDIT_VERCEL_PROJECT_ID=$(present "$S_VERCEL_PROJECT_ID$V_VERCEL_PROJECT_ID")"

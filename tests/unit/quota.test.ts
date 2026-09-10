@@ -45,6 +45,25 @@ describe("QuotaManager", () => {
     expect(q.stats().acquired).toBe(3);
   });
 
+  it("reste utilisable avec un débit inférieur à un appel par seconde (capacité d'un jeton)", async () => {
+    const clock = fakeClock();
+    const q = new QuotaManager("lent", {
+      maxPerSecond: 0.5,
+      maxConcurrency: 1,
+      now: clock.now,
+      sleep: clock.sleep,
+      random: () => 0,
+    });
+    const t0 = clock.now();
+    (await q.acquire())();
+    expect(clock.now() - t0).toBe(0);
+    (await q.acquire())();
+    // Deuxième appel : un jeton se régénère en 2 s à 0,5/s.
+    expect(clock.now() - t0).toBeGreaterThanOrEqual(2000);
+    expect(clock.now() - t0).toBeLessThan(2300);
+    expect(q.stats().acquired).toBe(2);
+  });
+
   it("borne la concurrence et libère le créneau", async () => {
     const clock = fakeClock();
     const q = new QuotaManager("test", {

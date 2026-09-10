@@ -92,3 +92,80 @@ export async function getDataQualityStats() {
     demoMode: isDemoModeEnabled(),
   };
 }
+
+export type ProviderMetrics = {
+  key: string;
+  name: string;
+  type: string;
+  configured: boolean;
+  reason: string | null;
+  status: string;
+  lastSyncAt: Date | null;
+  lastSuccessAt: Date | null;
+  lastErrorAt: Date | null;
+  lastError: string | null;
+  /** Offres visibles portées par cette source. */
+  activeJobs: number;
+  /** Offres visibles découvertes il y a moins de 24 h via cette source. */
+  newJobs24h: number;
+  /** Offres visibles dont cette source est la SEULE porteuse (apport unique). */
+  uniqueJobs: number;
+  /** Offres visibles portées par cette source ET par une autre (doublons inter-sources). */
+  sharedJobs: number;
+  /** Exécutions en erreur sur 24 h. */
+  errors24h: number;
+  runs24h: number;
+  /** Durée moyenne d'une exécution sur 24 h (ms). */
+  averageLatencyMs: number | null;
+  /** Fraîcheur de la source : minutes depuis le dernier succès (null si jamais). */
+  freshnessMinutes: number | null;
+};
+
+/** Métriques par source pour l'admin (statut, fraîcheur, apport unique, doublons, erreurs, latence). */
+export async function getProviderMetrics(now = new Date()): Promise<ProviderMetrics[]> {
+  const providers = getJobSourceProviders();
+  const dayAgo = new Date(now.getTime() - 86_400_000);
+  const rows = await prisma.jobSource.findMany({ select: { id: true, key: true, lastSyncAt: true, lastSyncStatus: true, lastSyncError: true } });
+  const visible = { isActive: true as const, canonicalJobId: null, isDemo: false as const, verificationStatus: { notIn: ["EXPIRED", "REMOVED"] as ("EXPIRED" | "REMOVED")[] } };
+  const alive = { in: ["ACTIVE", "UNKNOWN"] as ("ACTIVE" | "UNKNOWN")[] };
+  const out: ProviderMetrics[] = [];
+  for (const provider of providers) {
+    const status = await provider.status();
+    const row = rows.find((r) => r.key === provider.key);
+    if (!row) {
+      out.push({ key: provider.key, name: provider.name, type: provider.type, configured: status.configured, reason: status.reason ?? null, status: "IDLE", lastSyncAt: null, lastSuccessAt: null, lastErrorAt: null, lastError: null, activeJobs: 0, newJobs24h: 0, uniqueJobs: 0, sharedJobs: 0, errors24h: 0, runs24h: 0, averageLatencyMs: null, freshnessMinutes: null });
+      continue;
+    }
+    const [activeJobs, newJobs24h, sharedJobs, lastSuccess, lastErrorRun, runs24h] = await Promise.all([
+      prisma.job.count({ where: { ...visible, sourceEntries: { some: { sourceId: row.id, status: alive } } } }),
+      prisma.job.count({ where: { ...visible, discoveredAt: { gte: dayAgo }, sourceEntries: { some: { sourceId: row.id, status: alive } } } }),
+      prisma.job.count({ where: { ...visible, sourceEntries: { some: { sourceId: row.id, status: alive } }, AND: [{ sourceEntries: { some: { sourceId: { not: row.id }, status: alive } } }] } }),
+      prisma.ingestionRun.findFirst({ where: { sourceKey: provider.key, status: "SUCCESS" }, orderBy: { startedAt: "desc" }, select: { finishedAt: true, startedAt: true } }),
+      prisma.ingestionRun.findFirst({ where: { sourceKey: provider.key, status: "ERROR" }, orderBy: { startedAt: "desc" }, select: { finishedAt: true, startedAt: true, errorSummary: true } }),
+      prisma.ingestionRun.findMany({ where: { sourceKey: provider.key, startedAt: { gte: dayAgo } }, select: { status: true, durationMs: true } }),
+    ]);
+    const durations = runs24h.map((r) => r.durationMs).filter((d): d is number => d !== null);
+    const lastSuccessAt = lastSuccess?.finishedAt ?? lastSuccess?.startedAt ?? null;
+    out.push({
+      key: provider.key,
+      name: provider.name,
+      type: provider.type,
+      configured: status.configured,
+      reason: status.reason ?? null,
+      status: row.lastSyncStatus,
+      lastSyncAt: row.lastSyncAt,
+      lastSuccessAt,
+      lastErrorAt: lastErrorRun?.finishedAt ?? lastErrorRun?.startedAt ?? null,
+      lastError: lastErrorRun?.errorSummary ?? row.lastSyncError,
+      activeJobs,
+      newJobs24h,
+      uniqueJobs: activeJobs - sharedJobs,
+      sharedJobs,
+      errors24h: runs24h.filter((r) => r.status === "ERROR").length,
+      runs24h: runs24h.length,
+      averageLatencyMs: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null,
+      freshnessMinutes: lastSuccessAt ? Math.round((now.getTime() - lastSuccessAt.getTime()) / 60_000) : null,
+    });
+  }
+  return out;
+}

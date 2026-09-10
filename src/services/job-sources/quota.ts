@@ -25,6 +25,8 @@ export interface SharedQuotaStore {
   reserve(provider: string, bucket: Date, n: number): Promise<number>;
   /** Appels déjà réservés dans la minute `bucket` (0 si aucun). */
   usage(provider: string, bucket: Date): Promise<number>;
+  /** Journalise un 429 ou une erreur de requête dans la minute (observabilité, jamais bloquant). */
+  record?(provider: string, bucket: Date, kind: "rateLimited" | "errors"): Promise<void>;
 }
 
 export type QuotaManagerOptions = {
@@ -76,7 +78,7 @@ export class QuotaManager {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly random: () => number;
   /** Compteurs du processus (rapports, admin). */
-  readonly counters = { acquired: 0, rateLimited: 0, refusedLive: 0, waitedMs: 0 };
+  readonly counters = { acquired: 0, rateLimited: 0, refusedLive: 0, waitedMs: 0, errors: 0 };
 
   constructor(
     readonly provider: string,
@@ -93,14 +95,19 @@ export class QuotaManager {
     this.now = options.now ?? (() => Date.now());
     this.sleep = options.sleep ?? defaultSleep;
     this.random = options.random ?? Math.random;
-    this.tokens = this.opts.maxPerSecond;
+    this.tokens = this.capacity;
     this.lastRefill = this.now();
+  }
+
+  /** Capacité du seau : au moins un jeton, sinon un débit inférieur à 1/s ne pourrait jamais servir. */
+  private get capacity(): number {
+    return Math.max(1, this.opts.maxPerSecond);
   }
 
   private refill(): void {
     const now = this.now();
     const elapsed = Math.max(0, now - this.lastRefill) / 1000;
-    this.tokens = Math.min(this.opts.maxPerSecond, this.tokens + elapsed * this.opts.maxPerSecond);
+    this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.opts.maxPerSecond);
     this.lastRefill = now;
   }
 
@@ -220,12 +227,24 @@ export class QuotaManager {
     const until = this.now() + base + jitter;
     this.pausedUntil = Math.max(this.pausedUntil, until);
     this.counters.rateLimited++;
+    this.record("rateLimited");
     return this.pausedUntil - this.now();
   }
 
   /** Une requête a abouti : le backoff repart de zéro. */
   reportSuccess(): void {
     this.penalties = 0;
+  }
+
+  /** Une requête a échoué définitivement (5xx, réseau, délai après relances) : comptée, jamais bloquante. */
+  reportFailure(): void {
+    this.counters.errors++;
+    this.record("errors");
+  }
+
+  private record(kind: "rateLimited" | "errors"): void {
+    if (!this.shared?.record) return;
+    void this.shared.record(this.provider, minuteBucket(this.now()), kind).catch(() => undefined);
   }
 
   stats() {

@@ -4,9 +4,10 @@ name: Production sync
 #   priorité 1 — nouvelles offres (France entière, fenêtre 1 jour) ;
 #   priorité 2 — zones très demandées (fenêtre 7 jours) ;
 #   priorité 3 — recherches populaires dont l'actualisation est ancienne ;
-#   priorité 4 — rattrapage progressif du catalogue (fenêtre 31 jours, N départements les plus anciens) ;
-# puis vérification des offres absentes des derniers listages (jobs:verify), expiration (jobs:expire)
-# et rapport de couverture réelle (db:coverage).
+#   priorité 4 — rattrapage progressif du catalogue (fenêtre 90 jours, N départements les plus anciens) ;
+# puis deuxième source La bonne alternance (export complet quotidien découpé par département, si la clé
+# est présente), vérification des offres absentes des derniers listages (jobs:verify), expiration
+# (jobs:expire), rapport de couverture réelle (db:coverage) et contrôle qualité (db:quality).
 # Reprenable (points de reprise par département), idempotente (dédoublonnage par identifiant externe),
 # bornée (quota France Travail partagé, budget de temps), observable (résumé du run, table sync_checkpoint
 # visible dans /admin/data), jamais concurrente (groupe de concurrence, exécution en cours jamais annulée).
@@ -21,8 +22,12 @@ on:
         default: "100"
         required: false
       backfill_budget:
-        description: "Départements à rattraper (fenêtre 31 j) par exécution"
+        description: "Départements à rattraper (fenêtre 90 j) par exécution"
         default: "12"
+        required: false
+      lba_minutes:
+        description: "Budget de temps de la deuxième source La bonne alternance (minutes)"
+        default: "30"
         required: false
 
 concurrency:
@@ -100,6 +105,23 @@ jobs:
           grep -E "^\s*(OK|!!|KO)|Nouveautés|Zones demandées|Rattrapage|recherche\(s\) rafraîchie|requêtes sur" sync.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 60 >> "$GITHUB_STEP_SUMMARY" || true
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Deuxième source — La bonne alternance (export complet quotidien, par département)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LA_BONNE_ALTERNANCE_API_KEY: ${{ secrets.LA_BONNE_ALTERNANCE_API_KEY }}
+          LA_BONNE_ALTERNANCE_KEY_TYPE: ${{ vars.LA_BONNE_ALTERNANCE_KEY_TYPE }}
+          LBA_MINUTES: ${{ inputs.lba_minutes || '30' }}
+        run: |
+          printf '\n### La bonne alternance (deuxième source)\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$LA_BONNE_ALTERNANCE_API_KEY" ]; then
+            echo "SKIPPED — SECRET NOT CONFIGURED (LA_BONNE_ALTERNANCE_API_KEY) : clé gratuite sur https://api.apprentissage.beta.gouv.fr/compte/profil, puis variable LA_BONNE_ALTERNANCE_KEY_TYPE=production une fois la clé de production obtenue (support_api@apprentissage.beta.gouv.fr)." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            npm run jobs:sync:national -- --source la-bonne-alternance --scope france --window 120d --max-minutes "$LBA_MINUTES" --max-age-hours 20 --interleave-recent-minutes 0 --trigger cron | tee lba.log
+            grep -E "^\s*(OK|!!|KO)|Rattrapage|Ignorée|requêtes sur" lba.log | sed 's/\x1b\[[0-9;]*m//g' | tail -n 40 >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Vérification (offres absentes des listages d'abord) et expiration
         if: steps.check.outputs.configured == 'true'
         env:
@@ -121,4 +143,6 @@ jobs:
         run: |
           printf '\n### Couverture réelle\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
           npm run db:coverage | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '```\n\n### Contrôle qualité\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          npm run db:quality | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"

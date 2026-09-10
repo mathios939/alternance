@@ -44,6 +44,32 @@ export type CoverageReport = {
   liveSearches: { total: number; refreshed24h: number; hits24h: number };
   removed7Days: number;
   expired7Days: number;
+  /** Actives publiées depuis moins de 30 jours. */
+  last30Days: number;
+  byContractType: Array<{ contractType: string; count: number }>;
+  bySector: Array<{ sector: string; count: number }>;
+  byCity: Array<{ city: string; count: number }>;
+  /** Suivi du rattrapage : un point par territoire (fenêtre la plus large synchronisée). */
+  tracking: {
+    done: number;
+    inProgress: string[];
+    errors: Array<{ territory: string; window: string; error: string | null; at: string }>;
+    lastCheckpoint: { territory: string; window: string; status: string; at: string } | null;
+    averageDurationMs: number | null;
+    quota24h: { requests: number; rateLimited: number; errors: number; peakPerMinute: number };
+    territories: Array<{
+      code: string;
+      name: string;
+      region: string;
+      status: string;
+      window: string | null;
+      lastSuccessAt: string | null;
+      durationMs: number | null;
+      created: number;
+      fetched: number;
+      error: string | null;
+    }>;
+  };
 };
 
 export const VISIBLE_REAL_JOB_WHERE = {
@@ -57,6 +83,27 @@ export async function getCoverageReport(now: Date = new Date()): Promise<Coverag
   const dayAgo = new Date(now.getTime() - 86_400_000);
   const weekAgo = new Date(now.getTime() - 7 * 86_400_000);
   const visible = VISIBLE_REAL_JOB_WHERE;
+  const monthAgo = new Date(now.getTime() - 30 * 86_400_000);
+  const [last30Days, contractTypes, sectors, cities, quotaRows] = await Promise.all([
+    prisma.job.count({ where: { ...VISIBLE_REAL_JOB_WHERE, publishedAt: { gte: monthAgo } } }),
+    prisma.job.groupBy({
+      by: ["contractType"],
+      where: VISIBLE_REAL_JOB_WHERE,
+      _count: { _all: true },
+    }),
+    prisma.job.groupBy({ by: ["sector"], where: VISIBLE_REAL_JOB_WHERE, _count: { _all: true } }),
+    prisma.job.groupBy({
+      by: ["city"],
+      where: VISIBLE_REAL_JOB_WHERE,
+      _count: { _all: true },
+      orderBy: { _count: { city: "desc" } },
+      take: 25,
+    }),
+    prisma.providerQuota.findMany({
+      where: { bucket: { gte: dayAgo } },
+      select: { requests: true, rateLimited: true, errors: true },
+    }),
+  ]);
   const [
     totalOffers,
     activeAlternance,
@@ -90,8 +137,9 @@ export async function getCoverageReport(now: Date = new Date()): Promise<Coverag
         lastSyncStatus: true,
       },
     }),
+    // Couverture nationale France Travail uniquement : les points de reprise des autres sources ont leur propre provider.
     prisma.syncCheckpoint.findMany({
-      where: { kind: "TERRITORY" },
+      where: { kind: "TERRITORY", provider: "france-travail" },
       select: {
         territory: true,
         window: true,
@@ -99,6 +147,10 @@ export async function getCoverageReport(now: Date = new Date()): Promise<Coverag
         lastSuccessAt: true,
         lastError: true,
         updatedAt: true,
+        durationMs: true,
+        createdCount: true,
+        fetchedCount: true,
+        lastStartedAt: true,
       },
     }),
     prisma.syncCheckpoint.findMany({
@@ -183,6 +235,79 @@ export async function getCoverageReport(now: Date = new Date()): Promise<Coverag
       .sort((a, b) => a.window.localeCompare(b.window)),
   };
 
+  // Suivi par territoire : la fenêtre la plus large synchronisée avec succès l'emporte ; sinon l'état le plus récent.
+  const windowDays = (w: string) => Number(w.replace(/d$/, "")) || 0;
+  const perTerritory = new Map<string, (typeof checkpoints)[number]>();
+  for (const cp of checkpoints) {
+    const prev = perTerritory.get(cp.territory);
+    const better =
+      !prev ||
+      (cp.lastSuccessAt &&
+        (!prev.lastSuccessAt || windowDays(cp.window) > windowDays(prev.window))) ||
+      (!prev.lastSuccessAt && cp.updatedAt > prev.updatedAt);
+    if (better) perTerritory.set(cp.territory, cp);
+  }
+  const territoriesDetail = DEPARTMENTS.map((d) => {
+    const cp = perTerritory.get(d.code);
+    return {
+      code: d.code,
+      name: d.name,
+      region: d.region,
+      status: cp
+        ? cp.lastSuccessAt
+          ? cp.status === "RUNNING"
+            ? "RUNNING"
+            : cp.status === "SUCCESS"
+              ? "DONE"
+              : cp.status
+          : cp.status
+        : "PENDING",
+      window: cp?.window ?? null,
+      lastSuccessAt: cp?.lastSuccessAt?.toISOString() ?? null,
+      durationMs: cp?.durationMs ?? null,
+      created: cp?.createdCount ?? 0,
+      fetched: cp?.fetchedCount ?? 0,
+      error: cp?.lastError ?? null,
+    };
+  });
+  const successDurations = checkpoints
+    .filter((c) => c.lastSuccessAt && c.durationMs !== null && windowDays(c.window) >= 31)
+    .map((c) => c.durationMs!);
+  const lastCp =
+    [...checkpoints].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
+  const tracking: CoverageReport["tracking"] = {
+    done: territoriesDetail.filter((t) => t.lastSuccessAt !== null).length,
+    inProgress: [...territoryStatus.entries()]
+      .filter(([, s]) => s.status === "RUNNING")
+      .map(([t]) => t),
+    errors: checkpoints
+      .filter((c) => c.status === "ERROR")
+      .map((c) => ({
+        territory: c.territory,
+        window: c.window,
+        error: c.lastError,
+        at: c.updatedAt.toISOString(),
+      })),
+    lastCheckpoint: lastCp
+      ? {
+          territory: lastCp.territory,
+          window: lastCp.window,
+          status: lastCp.status,
+          at: lastCp.updatedAt.toISOString(),
+        }
+      : null,
+    averageDurationMs: successDurations.length
+      ? Math.round(successDurations.reduce((a, b) => a + b, 0) / successDurations.length)
+      : null,
+    quota24h: {
+      requests: quotaRows.reduce((s, r) => s + r.requests, 0),
+      rateLimited: quotaRows.reduce((s, r) => s + r.rateLimited, 0),
+      errors: quotaRows.reduce((s, r) => s + r.errors, 0),
+      peakPerMinute: quotaRows.reduce((m, r) => Math.max(m, r.requests), 0),
+    },
+    territories: territoriesDetail,
+  };
+
   return {
     checkedAt: now.toISOString(),
     totalOffers,
@@ -209,6 +334,15 @@ export async function getCoverageReport(now: Date = new Date()): Promise<Coverag
     },
     removed7Days,
     expired7Days,
+    last30Days,
+    byContractType: contractTypes
+      .map((c) => ({ contractType: c.contractType, count: c._count._all }))
+      .sort((a, b) => b.count - a.count),
+    bySector: sectors
+      .map((c) => ({ sector: c.sector, count: c._count._all }))
+      .sort((a, b) => b.count - a.count),
+    byCity: cities.map((c) => ({ city: c.city, count: c._count._all })),
+    tracking,
   };
 }
 
@@ -226,6 +360,7 @@ export function formatCoverageReport(
   lines.push(`ACTIVE_ALTERNANCE: ${r.activeAlternance}`);
   lines.push(`LAST_24H: ${r.last24h}`);
   lines.push(`LAST_7_DAYS: ${r.last7Days}`);
+  lines.push(`LAST_30_DAYS: ${r.last30Days}`);
   lines.push(`DISCOVERED_24H: ${r.discovered24h}`);
   lines.push(`PAYS_DE_LA_LOIRE: ${regionOf("Pays de la Loire")}`);
   lines.push(`BRETAGNE: ${regionOf("Bretagne")}`);
@@ -239,6 +374,12 @@ export function formatCoverageReport(
   for (const x of deps) lines.push(`  ${x.code} ${x.department}: ${x.count}`);
   if (options.maxDepartments && r.byDepartment.length > options.maxDepartments)
     lines.push(`  … ${r.byDepartment.length - options.maxDepartments} autre(s) département(s)`);
+  lines.push("BY_CONTRACT_TYPE:");
+  for (const x of r.byContractType) lines.push(`  ${x.contractType}: ${x.count}`);
+  lines.push("BY_SECTOR:");
+  for (const x of r.bySector) lines.push(`  ${x.sector}: ${x.count}`);
+  lines.push("BY_CITY (25 premières):");
+  for (const x of r.byCity) lines.push(`  ${x.city}: ${x.count}`);
   lines.push("BY_SOURCE:");
   for (const x of r.bySource)
     lines.push(
@@ -250,7 +391,19 @@ export function formatCoverageReport(
     lines.push(
       `  fenêtre ${w.window}: ${w.synced24h} synchronisés < 24 h · ${w.syncedEver} au moins une fois`,
     );
-  lines.push(`TERRITORIES_IN_PROGRESS: ${r.territories.inProgress}`);
+  lines.push(`TERRITORIES_DONE (au moins une fois): ${r.tracking.done} / ${r.territories.total}`);
+  lines.push(
+    `TERRITORIES_IN_PROGRESS: ${r.territories.inProgress}${r.tracking.inProgress.length ? ` (${r.tracking.inProgress.join(", ")})` : ""}`,
+  );
+  lines.push(
+    `LAST_CHECKPOINT: ${r.tracking.lastCheckpoint ? `${r.tracking.lastCheckpoint.territory} · ${r.tracking.lastCheckpoint.window} · ${r.tracking.lastCheckpoint.status} · ${r.tracking.lastCheckpoint.at}` : "aucun"}`,
+  );
+  lines.push(
+    `AVG_DURATION_PER_DEPARTMENT: ${r.tracking.averageDurationMs !== null ? `${Math.round(r.tracking.averageDurationMs / 1000)} s` : "—"}`,
+  );
+  lines.push(
+    `API_24H: ${r.tracking.quota24h.requests} requêtes · pic ${r.tracking.quota24h.peakPerMinute}/min · 429 : ${r.tracking.quota24h.rateLimited} · erreurs : ${r.tracking.quota24h.errors}`,
+  );
   lines.push(
     `TERRITORIES_ERRORS: ${r.territories.errors}${r.territories.lastError ? ` (dernière : ${r.territories.lastError})` : ""}`,
   );

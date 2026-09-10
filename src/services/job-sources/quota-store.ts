@@ -22,6 +22,14 @@ export const prismaQuotaStore: SharedQuotaStore = {
     });
     return row?.requests ?? 0;
   },
+  async record(provider, bucket, kind) {
+    await prisma.providerQuota.upsert({
+      where: { provider_bucket: { provider, bucket } },
+      create: { provider, bucket, requests: 0, [kind]: 1 },
+      update: { [kind]: { increment: 1 } },
+      select: { id: true },
+    });
+  },
 };
 
 /** Appels réservés sur les `minutes` dernières minutes (observabilité) et purge des compteurs de plus d'un jour. */
@@ -29,20 +37,22 @@ export async function recentQuotaUsage(
   provider: string,
   minutes = 60,
   now = new Date(),
-): Promise<{ requests: number; minutes: number; peakPerMinute: number }> {
+): Promise<{ requests: number; minutes: number; peakPerMinute: number; rateLimited: number; errors: number }> {
   const since = new Date(now.getTime() - minutes * 60_000);
   const rows = await prisma.providerQuota.findMany({
     where: { provider, bucket: { gte: since } },
-    select: { requests: true },
+    select: { requests: true, rateLimited: true, errors: true },
   });
   return {
     requests: rows.reduce((s, r) => s + r.requests, 0),
     minutes,
     peakPerMinute: rows.reduce((m, r) => Math.max(m, r.requests), 0),
+    rateLimited: rows.reduce((s, r) => s + r.rateLimited, 0),
+    errors: rows.reduce((s, r) => s + r.errors, 0),
   };
 }
 
-export async function purgeQuotaCounters(olderThanHours = 24, now = new Date()): Promise<number> {
+export async function purgeQuotaCounters(olderThanHours = 24 * 8, now = new Date()): Promise<number> {
   const res = await prisma.providerQuota.deleteMany({
     where: { bucket: { lt: new Date(now.getTime() - olderThanHours * 3_600_000) } },
   });
