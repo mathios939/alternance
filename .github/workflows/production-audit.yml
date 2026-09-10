@@ -1,0 +1,59 @@
+name: Production audit
+
+# Déclenchement manuel. Vérifie la PRÉSENCE des secrets et variables nécessaires à la mise en
+# production, sans jamais afficher une valeur. Aucune base n'est contactée, rien n'est déployé.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Présence des secrets et variables (valeurs jamais affichées)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Secrets (valeurs masquées par GitHub ; seule la présence est testée)
+      S_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      S_BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      S_CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      S_FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+      S_FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+      S_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      S_VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      S_VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      # Variables (non secrètes)
+      V_NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+      V_DEMO_MODE: ${{ vars.DEMO_MODE }}
+      V_VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      V_VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Rapport de présence
+        run: |
+          present() { if [ -n "$1" ]; then echo "PRESENT"; else echo "ABSENT"; fi; }
+          {
+            echo "## Production audit"
+            echo
+            echo "| Élément | Type | Statut |"
+            echo "|---|---|---|"
+            echo "| DATABASE_URL | secret | $(present "$S_DATABASE_URL") |"
+            echo "| BETTER_AUTH_SECRET | secret | $(present "$S_BETTER_AUTH_SECRET") |"
+            echo "| CRON_SECRET | secret | $(present "$S_CRON_SECRET") |"
+            echo "| FRANCE_TRAVAIL_CLIENT_ID | secret | $(present "$S_FRANCE_TRAVAIL_CLIENT_ID") |"
+            echo "| FRANCE_TRAVAIL_CLIENT_SECRET | secret | $(present "$S_FRANCE_TRAVAIL_CLIENT_SECRET") |"
+            echo "| VERCEL_TOKEN | secret | $(present "$S_VERCEL_TOKEN") |"
+            echo "| VERCEL_ORG_ID | secret ou variable | $(present "$S_VERCEL_ORG_ID$V_VERCEL_ORG_ID") |"
+            echo "| VERCEL_PROJECT_ID | secret ou variable | $(present "$S_VERCEL_PROJECT_ID$V_VERCEL_PROJECT_ID") |"
+            echo "| NEXT_PUBLIC_APP_URL | variable | $(present "$V_NEXT_PUBLIC_APP_URL") |"
+            echo "| DEMO_MODE | variable | $(present "$V_DEMO_MODE") |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "AUDIT_DATABASE_URL=$(present "$S_DATABASE_URL")"
+          echo "AUDIT_BETTER_AUTH_SECRET=$(present "$S_BETTER_AUTH_SECRET")"
+          echo "AUDIT_CRON_SECRET=$(present "$S_CRON_SECRET")"
+          echo "AUDIT_FRANCE_TRAVAIL=$(present "$S_FRANCE_TRAVAIL_CLIENT_ID$S_FRANCE_TRAVAIL_CLIENT_SECRET")"
+          echo "AUDIT_VERCEL_TOKEN=$(present "$S_VERCEL_TOKEN")"
+          echo "AUDIT_VERCEL_ORG_ID=$(present "$S_VERCEL_ORG_ID$V_VERCEL_ORG_ID")"
+          echo "AUDIT_VERCEL_PROJECT_ID=$(present "$S_VERCEL_PROJECT_ID$V_VERCEL_PROJECT_ID")"
+          echo "AUDIT_NEXT_PUBLIC_APP_URL=$(present "$V_NEXT_PUBLIC_APP_URL")"
+          echo "AUDIT_DEMO_MODE=$(present "$V_DEMO_MODE")"
