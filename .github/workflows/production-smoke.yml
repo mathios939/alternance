@@ -1,0 +1,43 @@
+name: Production smoke test
+
+# Déclenchement manuel. Joue le parcours visiteur (Playwright, desktop + mobile) contre l'URL
+# publique de production : pages en 200, recherche, vraie offre France Travail, favori et
+# personnalisation conservés après rechargement, lien de candidature officiel, entreprise, Radar,
+# carte, /dashboard expliqué, santé. Aucun compte créé, aucune donnée modifiée.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL publique (sans slash final)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Parcours visiteur sur ${{ inputs.url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_VERSION: "22"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PRODUCTION_URL: ${{ inputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Installer les dépendances et Chromium
+        run: |
+          npm ci
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD= npx playwright install --with-deps chromium
+      - name: Smoke test visiteur (desktop + mobile)
+        run: npx playwright test -c playwright.production.config.ts --workers=1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: production-smoke-traces
+          path: test-results/
+          retention-days: 7
