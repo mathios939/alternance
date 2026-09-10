@@ -16,7 +16,12 @@ import { useGuestFavorites } from "@/lib/guest/use-guest-favorites";
 import { CompanyLogo } from "@/features/jobs/components/job-card";
 import { OpportunityScoreBadge } from "./opportunity-score";
 
-type Props = { company: CompanyCardData & { nearestCity?: string }; variant?: "default" | "compact"; /** Obligatoire : favoris du compte ou du navigateur. */ isAuthenticated: boolean; className?: string };
+type Props = {
+  company: CompanyCardData & { nearestCity?: string };
+  variant?: "default" | "compact";
+  /** Obligatoire : favoris du compte ou du navigateur. */ isAuthenticated: boolean;
+  className?: string;
+};
 
 /** Carte d'entreprise. Sans compte, « Suivre » sauvegarde dans le navigateur. */
 export function CompanyCard({ company, variant = "default", isAuthenticated, className }: Props) {
@@ -31,7 +36,10 @@ export function CompanyCard({ company, variant = "default", isAuthenticated, cla
     e.stopPropagation();
     if (!isAuthenticated) {
       const r = guest.toggleCompany(company.id);
-      if (r.saved) toast.success("Entreprise suivie dans ce navigateur", { description: "Crée un compte gratuitement pour la retrouver sur tous tes appareils." });
+      if (r.saved)
+        toast.success("Entreprise suivie dans ce navigateur", {
+          description: "Crée un compte gratuitement pour la retrouver sur tous tes appareils.",
+        });
       else toast.success("Retirée des favoris");
       return;
     }
@@ -39,7 +47,10 @@ export function CompanyCard({ company, variant = "default", isAuthenticated, cla
       setFavorite(!optimisticFavorite);
       const result = await toggleFavorite({ companyId: company.id, collection: "COMPANIES" });
       if (!result.ok) toast.error(result.error);
-      else toast.success(result.data.saved ? "Entreprise ajoutée à tes favoris" : "Retirée des favoris");
+      else
+        toast.success(
+          result.data.saved ? "Entreprise ajoutée à tes favoris" : "Retirée des favoris",
+        );
       router.refresh();
     });
   }
@@ -47,36 +58,56 @@ export function CompanyCard({ company, variant = "default", isAuthenticated, cla
   const sector = SECTORS[company.sector as SectorKey];
   const compact = variant === "compact";
   return (
-    <article className={cn("surface surface-hover relative p-4", className)}>
-      <Link href={`/companies/${company.slug}`} className="absolute inset-0 rounded-xl" aria-label={company.name} />
+    <article className={cn("surface surface-hover relative min-w-0 p-4", className)}>
+      <Link
+        href={`/companies/${company.slug}`}
+        className="absolute inset-0 rounded-xl"
+        aria-label={company.name}
+      />
       <div className="pointer-events-none relative [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
         <div className="flex items-start gap-3">
           <CompanyLogo name={company.name} logoUrl={company.logoUrl} />
           <div className="min-w-0 flex-1">
-            <h3 className="flex items-center gap-1.5 truncate font-semibold">
+            <h3 className="flex min-w-0 items-center gap-1.5 truncate font-semibold">
               <span className="truncate">{company.name}</span>
-              {company.isDemo ? <span className="shrink-0 rounded-md bg-warning-soft px-1.5 py-px text-[10px] font-medium text-warning-foreground dark:text-warning" title="Entreprise de démonstration (fictive)">Démo</span> : null}
+              {company.isDemo ? (
+                <span
+                  className="bg-warning-soft text-warning-foreground dark:text-warning shrink-0 rounded-md px-1.5 py-px text-[10px] font-medium"
+                  title="Entreprise de démonstration (fictive)"
+                >
+                  Démo
+                </span>
+              ) : null}
             </h3>
-            <p className="truncate text-xs text-muted-foreground">
-              {sector ? `${sector.emoji} ${sector.label}` : company.sector} · {COMPANY_SIZES[company.size].label}
+            <p className="text-muted-foreground truncate text-xs">
+              {sector ? `${sector.emoji} ${sector.label}` : company.sector} ·{" "}
+              {COMPANY_SIZES[company.size].label}
             </p>
           </div>
           {company.opportunity ? <OpportunityScoreBadge opportunity={company.opportunity} /> : null}
         </div>
-        {!compact && company.description ? <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{company.description}</p> : null}
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {!compact && company.description ? (
+          <p className="text-muted-foreground mt-3 line-clamp-2 text-sm [overflow-wrap:anywhere]">
+            {company.description}
+          </p>
+        ) : null}
+        <div className="text-muted-foreground mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <span className="inline-flex items-center gap-1">
             <MapPin className="size-3.5" aria-hidden /> {company.nearestCity ?? company.city}
-            {company.distanceKm !== null ? <span className="text-foreground/70"> · {formatDistanceKm(company.distanceKm)}</span> : null}
+            {company.distanceKm !== null ? (
+              <span className="text-foreground/70"> · {formatDistanceKm(company.distanceKm)}</span>
+            ) : null}
           </span>
           {company.headcount ? (
             <span className="inline-flex items-center gap-1">
-              <Users className="size-3.5" aria-hidden /> {company.headcount.toLocaleString("fr-FR")} salariés
+              <Users className="size-3.5" aria-hidden /> {company.headcount.toLocaleString("fr-FR")}{" "}
+              salariés
             </span>
           ) : null}
           {company.activeJobsCount > 0 ? (
-            <span className="inline-flex items-center gap-1 font-medium text-primary">
-              <Briefcase className="size-3.5" aria-hidden /> {company.activeJobsCount} offre{company.activeJobsCount > 1 ? "s" : ""}
+            <span className="text-primary inline-flex items-center gap-1 font-medium">
+              <Briefcase className="size-3.5" aria-hidden /> {company.activeJobsCount} offre
+              {company.activeJobsCount > 1 ? "s" : ""}
             </span>
           ) : null}
           {company.hiresApprentices ? (
@@ -99,10 +130,21 @@ export function CompanyCard({ company, variant = "default", isAuthenticated, cla
             <Button asChild variant="outline" size="sm">
               <Link href={`/companies/${company.slug}`}>Voir l'entreprise</Link>
             </Button>
-            <Button variant={isFavorite ? "soft" : "ghost"} size="sm" onClick={onSave} disabled={pending} aria-pressed={isFavorite}>
-              {isFavorite ? <BookmarkCheck /> : <Bookmark />} <span className="hidden sm:inline">{isFavorite ? "Suivie" : "Suivre"}</span>
+            <Button
+              variant={isFavorite ? "soft" : "ghost"}
+              size="sm"
+              onClick={onSave}
+              disabled={pending}
+              aria-pressed={isFavorite}
+            >
+              {isFavorite ? <BookmarkCheck /> : <Bookmark />}{" "}
+              <span className="hidden sm:inline">{isFavorite ? "Suivie" : "Suivre"}</span>
             </Button>
-            {company.hasApplication ? <Badge variant="soft" className="ml-auto">Candidature en cours</Badge> : null}
+            {company.hasApplication ? (
+              <Badge variant="soft" className="ml-auto">
+                Candidature en cours
+              </Badge>
+            ) : null}
           </div>
         ) : null}
       </div>

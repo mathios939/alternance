@@ -339,7 +339,7 @@ export function JobCard({
   );
 
   const base = cn(
-    "surface relative block p-4 text-left transition-all duration-200",
+    "surface relative block min-w-0 p-4 text-left transition-all duration-200",
     onSelect ? "w-full cursor-pointer hover:border-foreground/20 hover:shadow-md" : "surface-hover",
     selected && "border-primary ring-2 ring-primary/20 shadow-md",
     isLarge && "p-5",
